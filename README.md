@@ -1,2 +1,2 @@
 # ARMEABISupport
-Support modules for RISC OS GCC
+Support module for RISC OS GCC

@@ -43,7 +43,9 @@ SWI "ARMEABISupport_MemoryOp"
 		bit 0-3 = Type: 1 - page allocator
 				2 - heap allocator
 				3 - single use
-		bit 4   = Set: allocator is global, clear: allocator is specific to current task
+		bit 4   = Set: allocator is global
+			  Clear: allocator is specific to current task and will be destroyed
+			  	 on program exit.
 	  Exit:
 	   r0 = handle of new allocator (V flag clear) or error pointer (V flag set)
 	1 - destroy allocator

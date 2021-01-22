@@ -78,11 +78,11 @@ stackabort_pass_on:
 	LDMFD	sp!, {r1-r8, r10-r11, pc}
 stackabort_overflow:
 	@ FIXME: How can we propagate a stack overflow through Unixlib to the program?
-	REPORT_TEXT "Stack overflow"
-	REPORT_TEXT "Base:"
-	REPORT_HEX r2
-	REPORT_TEXT "Top:"
-	REPORT_HEX r3
+@	REPORT_TEXT "Stack overflow"
+@	REPORT_TEXT "Base:"
+@	REPORT_HEX r2
+@	REPORT_TEXT "Top:"
+@	REPORT_HEX r3
 
 	MOV	r0, #ABORT_HANDLER_PASS_ON
 	LDMFD	sp!, {r1-r8, r10-r11, pc}

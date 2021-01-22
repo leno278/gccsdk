@@ -35,16 +35,16 @@ _kernel_oserror *dynamic_area_create (const char *name,
 #ifndef USE_INLINE_SWIS
 _kernel_oserror *rma_claim (int __size, void **block_ret);
 _kernel_oserror *rma_free (void *_block);
-_kernel_oserror *dynamic_pmp_claim_release (const int da,
+_kernel_oserror *dynamic_pmp_claim_release (int da,
 					    pmp_phy_page_entry *page_list,
 					    int num_entries);
-_kernel_oserror *dynamic_pmp_map_unmap (const int da,
+_kernel_oserror *dynamic_pmp_map_unmap (int da,
 					pmp_log_page_entry *page_list,
 					int num_entries);
-_kernel_oserror *dynamic_pmp_resize (const int da,
+_kernel_oserror *dynamic_pmp_resize (int da,
 				     int page_diff,
 				     int *changed_ret);
-_kernel_oserror *dynamic_pmp_page_info(const int da,
+_kernel_oserror *dynamic_pmp_page_info(int da,
 				       pmp_page_info_entry *page_list,
 				       int num_entries);
 void report_text(const char *text);

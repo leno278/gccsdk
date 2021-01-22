@@ -15,8 +15,6 @@
 #include "abort.h"
 #include "stack.h"
 #include "memory.h"
-#define DEBUG_PRINT 1
-#define DEBUG_REPORT 1
 #include "debug.h"
 
 armeabisupport_globals global;
@@ -131,7 +129,7 @@ void report_swi_error(const char *func, int line, _kernel_oserror *err)
   report_text(buffer);
 }
 
-static const char filename[] = "$.armeabisupport/log";
+static const char filename[] = "$.debug/log";
 
 static void logwrite(const char *buffer)
 {
@@ -158,7 +156,7 @@ static void logwrite(const char *buffer)
 
 void log_printf(unsigned flags, const char *format, ...)
 {
-  if (flags)
+//  if (flags)
   {
     char buffer[512];
     char *p = buffer;
@@ -183,10 +181,6 @@ void log_printf(unsigned flags, const char *format, ...)
     *p++ = '\n';
     *p = '\0';
 
-    if (flags & LOG_PRINT)
-      logwrite(buffer);  
-    
-    if (flags & LOG_REPORT)
-      report_text(buffer);
+    logwrite(buffer);
   }
 }

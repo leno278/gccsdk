@@ -43,8 +43,11 @@ typedef struct dynamicarea_block
 {
   unsigned int number;
   eabi_PTR base;
-  eabi_PTR end;
- 
+  /* Size of DA in pages.  */
+  size_t size;
+  /* The maximum number of pages available for allocation.
+   * base + (max_size - 1) gives the last addressable page. */
+  size_t max_size;
 } dynamicarea_block;
 
 typedef struct _app_object

@@ -26,6 +26,8 @@
 #define ARMEABISUPPORT_MEMORYOP_GET_PAGE_NUMBER		9
 #define ARMEABISUPPORT_MEMORYOP_ALLOCATOR_FROM_ADDRESS	10
 #define ARMEABISUPPORT_MEMORYOP_ALLOCATOR_FROM_DA	11
+#define ARMEABISUPPORT_MEMORYOP_MMAP			12
+#define ARMEABISUPPORT_MEMORYOP_MUNMAP			13
 
 #define ARMEABISUPPORT_STACKOP_ALLOC			0
 #define ARMEABISUPPORT_STACKOP_FREE			1
@@ -37,6 +39,7 @@
 #define ARMEABISUPPORT_ALLOCATOR_TYPE_PAGE_MAPPED	1
 #define ARMEABISUPPORT_ALLOCATOR_TYPE_HEAP		2
 #define ARMEABISUPPORT_ALLOCATOR_TYPE_SINGLE_USE	3
+#define ARMEABISUPPORT_ALLOCATOR_TYPE_MMAP              4
 #define ARMEABISUPPORT_ALLOCATOR_FLAG_GLOBAL		(1 << 5)
 
 #define ARMEABISUPPORT_ALLOCATOR_ALLOC_FLAG_ALLOC_ONLY	(0 << ARMEABISUPPORT_ALLOCATOR_ALLOC_FLAGS_SHIFT)
@@ -105,6 +108,30 @@ armeabi_memory_alloc(armeabi_allocator_t __allocator,
 		: "r" (allocator),
 		  "r" (num_pages),
 		  "r" (flags),
+		  [XARMEABISupport_MemoryOp] "i" (XOS_Bit | ARMEABISupport_MemoryOp),
+		  [reason] "I" (ARMEABISUPPORT_MEMORYOP_ALLOC)
+		: "r0", "lr", "cc");
+  return err;
+}
+
+static inline _kernel_oserror *
+armeabi_memory_alloc_heap(armeabi_allocator_t __allocator,
+			  size_t __num_bytes,
+			  eabi_PTR *block_ret)
+{
+  register armeabi_allocator_t allocator asm("r1") = __allocator;
+  register unsigned num_bytes asm("r2") = __num_bytes;
+  _kernel_oserror *err;
+
+  asm volatile ("	MOV	r0, %[reason];\n"
+		"	SWI	%[XARMEABISupport_MemoryOp];\n"
+		"	MOVVC	%[err], #0;\n"
+		"	MOVVC	%[block], r0;\n"
+		"	MOVVS	%[err], r0;\n"
+		"	MOVVS	%[block], #0;\n"
+		: [err] "=r" (err), [block] "=r" (*block_ret)
+		: "r" (allocator),
+		  "r" (num_bytes),
 		  [XARMEABISupport_MemoryOp] "i" (XOS_Bit | ARMEABISupport_MemoryOp),
 		  [reason] "I" (ARMEABISUPPORT_MEMORYOP_ALLOC)
 		: "r0", "lr", "cc");
@@ -347,6 +374,56 @@ armeabi_memory_allocator_from_da(int __da,
   return err;
 }
 
+static inline _kernel_oserror *
+armeabi_memory_mmap(armeabi_allocator_t __allocator,
+		    unsigned __num_pages,
+		    unsigned __flags,
+		    eabi_PTR *block_ret)
+{
+  register armeabi_allocator_t allocator asm("r1") = __allocator;
+  register unsigned num_pages asm("r2") = __num_pages;
+  register unsigned flags asm("r3") = __flags;
+  _kernel_oserror *err;
+
+  asm volatile ("	MOV	r0, %[reason];\n"
+		"	SWI	%[XARMEABISupport_MemoryOp];\n"
+		"	MOVVC	%[err], #0;\n"
+		"	MOVVC	%[block], r0;\n"
+		"	MOVVS	%[err], r0;\n"
+		"	MOVVS	%[block], #0;\n"
+		: [err] "=r" (err), [block] "=r" (*block_ret)
+		: "r" (allocator),
+		  "r" (num_pages),
+		  "r" (flags),
+		  [XARMEABISupport_MemoryOp] "i" (XOS_Bit | ARMEABISupport_MemoryOp),
+		  [reason] "I" (ARMEABISUPPORT_MEMORYOP_MMAP)
+		: "r0", "lr", "cc");
+  return err;
+}
+
+static inline _kernel_oserror *
+armeabi_memory_munmap(armeabi_allocator_t __allocator,
+		      eabi_PTR __block,
+		      size_t __page_count)
+{
+  register armeabi_allocator_t allocator asm("r1") = __allocator;
+  register eabi_PTR block asm("r2") = __block;
+  register size_t page_count asm("r3") = __page_count;
+  _kernel_oserror *err;
+
+  asm volatile ("	MOV	r0, %[reason];\n"
+		"	SWI	%[XARMEABISupport_MemoryOp];\n"
+		"	MOVVC	%[err], #0;\n"
+		"	MOVVS	%[err], r0;\n"
+		: [err] "=r" (err)
+		: "r" (allocator),
+		  "r" (block),
+		  "r" (page_count),
+		  [XARMEABISupport_MemoryOp] "i" (XOS_Bit | ARMEABISupport_MemoryOp),
+		  [reason] "I" (ARMEABISUPPORT_MEMORYOP_MUNMAP)
+		: "r0", "lr", "cc");
+  return err;
+}
 static inline _kernel_oserror *
 armeabi_abort_register(int (*handler)(void *fault_address), void *r12)
 {

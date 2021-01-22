@@ -103,8 +103,10 @@ error:
 
 _kernel_oserror *module_finalisation (int fatal, int podule_base, void *pw)
 {
+#if !DEBUG_ALLOCATOR
   if (global.app_list.count > 0)
     return armeabisupport_in_use;
+#endif
 
   allocator_destroy_internal(global.stack_allocator);
 

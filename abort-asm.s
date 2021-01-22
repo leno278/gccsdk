@@ -288,7 +288,6 @@ postfilter__exit:
 @ r12 - Workspace pointer passed to OS_DynamicArea 0
 	.global da_handler
 da_handler:
-@REPORT_TEXT "da_handler"
 	CMP     r0, #1<<31
 	CMNVC   r0, #1<<31
 	ADR	r0, error

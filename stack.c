@@ -1,6 +1,6 @@
 /* stack.c
  *
- * Copyright 2019 GCCSDK Developers
+ * Copyright 2019-2021 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -85,7 +85,7 @@ stack_op(_kernel_swi_regs *r)
     }
     case STACKOP_GET_BOUNDS: {
       stack_object *stack;
-      
+
       if ((stack = (stack_object *)r->r[1]) == NULL)
       {
 	r->r[1] = r->r[2] = 0;
@@ -99,7 +99,7 @@ stack_op(_kernel_swi_regs *r)
     }
     case STACKOP_GET_SIZE: {
       stack_object *stack;
-      
+
       if ((stack = (stack_object *)r->r[1]) == NULL)
       {
 	r->r[1] = r->r[2] = 0;
@@ -127,7 +127,7 @@ stack_alloc(unsigned page_count, unsigned num_guard_pages, const char *name,
     return armeabisupport_bad_param;
 
   _kernel_oserror *err;
-  armeabisupport_allocator *allocator;
+  armeabi_allocator_t allocator;
 
   if (global.stack_allocator == NULL)
   {
@@ -137,8 +137,8 @@ stack_alloc(unsigned page_count, unsigned num_guard_pages, const char *name,
 				 &allocator);
     if (err)
       return err;
-    abort_block *block = get_data_abort_support_block();
-    block->stack_allocator = global.stack_allocator = allocator;
+
+    global.stack_allocator = allocator;
   }
   else
     allocator = global.stack_allocator;
@@ -194,9 +194,6 @@ stack_alloc(unsigned page_count, unsigned num_guard_pages, const char *name,
 
   linklist_add_to_end(&app->stack_list, &stack->link);
 
-  abort_block *abort = get_data_abort_support_block();
-  abort->first_stack = linklist_first_stack_object(&app->stack_list);
-
   *handle_ret = stack;
   *base_ret = block + (num_guard_pages << PAGE_SHIFT);
   *top_ret = block + ((page_count + num_guard_pages) << PAGE_SHIFT);
@@ -229,10 +226,6 @@ stack_free_internal(stack_object *stack, app_object *app)
   allocator_free (allocator, stack->base);
   linklist_remove (&app->stack_list, &stack->link);
   rma_free (stack);
-
-  /* Reset the abort handler support block in case we free'd the first stack.  */
-  abort_block *abort = get_data_abort_support_block();
-  abort->first_stack = linklist_first_stack_object(&app->stack_list);
 
   return NULL;
 }

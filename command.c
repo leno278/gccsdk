@@ -1,6 +1,6 @@
 /* command.c
  *
- * Copyright 2018 GCCSDK Developers
+ * Copyright 2018-2021 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -18,24 +18,14 @@ static void
 command_info(void)
 {
   app_object *app;
-  armeabisupport_allocator *allocator;
-
   for (app = linklist_first_app_object (&global.app_list);
        app;
        app = linklist_next_app_object (app))
     {
       printf("App %X\n", app->ID);
 
-      for (allocator = linklist_first_armeabisupport_allocator(&app->allocator_list);
-	   allocator;
-	   allocator = linklist_next_armeabisupport_allocator(allocator))
-	{
-#if DEBUG_ALLOCATOR
-	  dump_memblock_list(allocator);
-#else
-	  printf("  Allocator: '%s'\n", allocator->name);
-#endif
-	}
+      allocator_dump_all(&app->allocator_list);
+
       stack_object *stack;
       for (stack = linklist_first_stack_object (&app->stack_list);
 	   stack;
@@ -46,28 +36,10 @@ command_info(void)
     }
 
   printf("Global allocators:\n");
-  for (allocator = linklist_first_armeabisupport_allocator(&global.allocator_list);
-       allocator;
-       allocator = linklist_next_armeabisupport_allocator(allocator))
-    {
-      printf("  Allocator: '%s'\n", allocator->name);
-      printf("  Type: ");
-      switch (allocator->flags & ALLOCATOR_TYPE_MASK) {
-      case ALLOCATOR_TYPE_PAGE:
-	printf("paged\n");
-	break;
-      case ALLOCATOR_TYPE_HEAP:
-	printf("heap\n");
-	break;
-      case ALLOCATOR_TYPE_SINGLE_USE:
-	printf("single use\n");
-	break;
-      case ALLOCATOR_TYPE_MMAP:
-	printf("mmap\n\n");
-	dump_freeblock_list(allocator);
-	break;
-      }
-    }
+  allocator_dump_all(&global.allocator_list);
+
+  printf("mmaps:\n");
+  allocator_dump_all(&global.mmap_allocator_pool);
 }
 
 _kernel_oserror *

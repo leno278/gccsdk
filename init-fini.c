@@ -1,6 +1,6 @@
 /* init-fini.c
  *
- * Copyright 2019 GCCSDK Developers
+ * Copyright 2019-2021 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -92,6 +92,19 @@ _kernel_oserror *module_initialise (const char *tail, int podule_base, void *pw)
    || (err = install_post_filter()) != NULL)
     goto error;
 
+  get_os_permissions(OS_PERMISSION_FLAG_USER_READ,
+		     OS_PERMISSION_FLAG_USER_READ | OS_PERMISSION_FLAG_USER_WRITE | OS_PERMISSION_FLAG_USER_EXEC,
+		     &global.os_memory_prot_read);
+  get_os_permissions(OS_PERMISSION_FLAG_USER_READ | OS_PERMISSION_FLAG_USER_WRITE,
+		     OS_PERMISSION_FLAG_USER_READ | OS_PERMISSION_FLAG_USER_WRITE | OS_PERMISSION_FLAG_USER_EXEC,
+		     &global.os_memory_prot_read_write);
+  get_os_permissions(OS_PERMISSION_FLAG_USER_EXEC,
+		     OS_PERMISSION_FLAG_USER_READ | OS_PERMISSION_FLAG_USER_WRITE | OS_PERMISSION_FLAG_USER_EXEC,
+		     &global.os_memory_prot_exec);
+  get_os_permissions(OS_PERMISSION_FLAG_PRIV_READ,
+		     OS_PERMISSION_FLAG_PRIV_READ | OS_PERMISSION_FLAG_PRIV_WRITE | OS_PERMISSION_FLAG_PRIV_EXEC |
+		     OS_PERMISSION_FLAG_USER_READ | OS_PERMISSION_FLAG_USER_WRITE | OS_PERMISSION_FLAG_USER_EXEC,
+		     &global.os_memory_prot_none);
   return NULL;
 
 error:

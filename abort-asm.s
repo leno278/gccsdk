@@ -42,11 +42,7 @@ USR_mode:
 	@ Guard against an abort in this abort handler, as soon as possible at least
 	LDR	r0, [r7, #ABORT_BLOCK_IN_HANDLER]
 	TEQ	r0, #1
-@	.if DEBUG_HANDLER_DUMP_REGS == 1
 	BEQ	handler__internal_abort
-@	.else
-@	BEQ	handler__pass_on
-@	.endif
 
 	@ Read the address of the fault
 	MRC	P15, 0, r8, C6, C0

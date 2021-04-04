@@ -1,6 +1,6 @@
 /* main.c
  *
- * Copyright 2019 GCCSDK Developers
+ * Copyright 2019-2021 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -83,6 +83,7 @@ app_remove_by_handle(app_object *app)
 {
   if (app)
     {
+      abort_deregister(get_mmap_abort_handler(), (unsigned)&global.mmap_allocator_pool);
       abort_deregister(get_stack_abort_handler(), (unsigned)&app->stack_abort_data);
       linklist_remove(&global.app_list, &app->link);
       rma_free(app);

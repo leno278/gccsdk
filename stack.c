@@ -206,9 +206,9 @@ error__claimed:
   allocator_release_pages(allocator, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
 error__alloced:
 #ifdef NO_STACK_ABORT_HANDLER
-  allocator_free (allocator, block);
+  allocator_free(allocator, block);
 #else
-  allocator_free (allocator, block);
+  allocator_free(allocator, block);
 #endif
 
   *handle_ret = 0;
@@ -223,9 +223,9 @@ stack_free_internal(stack_object *stack, app_object *app)
 {
   armeabisupport_allocator *allocator = global.stack_allocator;
 
-  allocator_free (allocator, stack->base);
-  linklist_remove (&app->stack_list, &stack->link);
-  rma_free (stack);
+  allocator_free(allocator, stack->base);
+  linklist_remove(&app->stack_list, &stack->link);
+  rma_free(stack);
 
   return NULL;
 }

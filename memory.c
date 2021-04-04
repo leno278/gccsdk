@@ -419,7 +419,6 @@ allocator_claim_pages (armeabisupport_allocator *allocator,
   _kernel_oserror *err;
   int i, pmp_index;
 
-  
   if ((err = rma_claim(sizeof(*list) * num_pages, (void **)&list)) != NULL)
     return err;
 

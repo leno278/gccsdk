@@ -72,6 +72,63 @@ static _kernel_oserror *
 armeabi_get_page_protection (eabi_PTR addr,
 			     int *prot_ret);
 
+/*  r0 = reason code
+*	0 - Map
+*	  Entry:
+*	    r1 = address (usually NULL, otherwise must point to existing block and even then can
+*			  only be used to change protection)
+*	    r2 = length of mapping in bytes
+*	    r3 = protection flags as used by mmap
+*	    r4 = mmap flags
+*	    r5 = fd
+*	    r6 = offset
+*	Exit:
+*	    r0 = page aligned address of allocated block if successful (V flag clear) or error pointer (V flag set)
+*	1 - Unmap
+*	  Entry:
+*	    r1 = address - must exist in an existing block, but does not have to be its start address
+*	    r2 = length of mapping in bytes - address + length must be contained within an existing block
+*	  Exit:
+*	    r0 = 0 if successful (V flag clear) or error pointer (V flag set)
+*	2 - Advise
+*	  Entry:
+*	    r1 = address
+*	    r2 = number of bytes
+*	    r3 = advice - as per madvise
+*	  Exit:
+*	    r0 = 0 if successful (V flag clear) or error pointer (V flag set)
+*	3 - Protect
+*	  Entry:
+*	    r1 = address
+*	    r2 = number of bytes
+*	    r3 = prot - as per mprotect
+*	  Exit:
+*	    r0 = 0 if successful (V flag clear) or error pointer (V flag set)
+*	4 - GetInfo
+*	  Entry:
+*	    r1 = address within an existing block
+*	  Exit:
+*	    r0 = address of start of block if successful (V flag clear) or error pointer (V flag set)
+*	    r1 = length of block in bytes
+*	    r2 = mmap protection flags when block was allocated
+*	    r3 = mmap flags used when block was allocated
+*	    r4 = mmap fd given when block was allocated
+*	    r5 = mmap offset given when block was allocated
+*	5 - Remap
+*	  Entry:
+*	    r1 = address of block to remap
+*	    r2 = old length of block in bytes
+*	    r3 = new length of block in bytes
+*	    r4 = flags as mremap
+*	  Exit:
+*	    r0 = address of block's new address if successful (V flag clear) or error pointer (V flag set)
+*	6 - Get Protection
+*	  Entry:
+*	    r1 = address within page to get protection flags of
+*	  Exit:
+*	    r0 = mmap protection flags for page containing address given
+*/
+
 _kernel_oserror *
 mmap_op(_kernel_swi_regs *r)
 {

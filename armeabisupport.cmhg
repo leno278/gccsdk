@@ -30,4 +30,10 @@ error-identifiers: armeabisupport_bad_reason("Unknown ARMEABISupport SWI reason 
 		   armeabisupport_no_memory("ARMEABISupport was unable to allocate memory"),
 		   armeabisupport_bad_process("Process not known to ARMEABISupport"),
 		   armeabisupport_in_use("There are still clients using ARMEABISupport"),
-		   armeabisupport_page_map_error("Page mapping error")
+		   armeabisupport_page_map_error("Page mapping error"),
+		   armeabisupport_EACCES("EACCES"),
+		   armeabisupport_EEXIST("EEXIST"),
+		   armeabisupport_EINVAL("EINVAL"),
+		   armeabisupport_ENAMETOOLONG("ENAMETOOLONG"),
+		   armeabisupport_ENOENT("ENOENT"),
+		   armeabisupport_ENOSPC("ENOSPC")

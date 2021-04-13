@@ -8,6 +8,7 @@
 #include "mmap.h"
 #include "memory.h"
 #include "abort.h"
+#include "shm.h"
 #include "main.h"
 #include "swi.h"
 #include "debug.h"
@@ -314,7 +315,7 @@ _kernel_oserror *
 armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t offset,
 	     armeabisupport_allocator_mmap **allocator_ret, mmap_block **block_ret)
 {
-  TRACE("armeabi_mmap(size:%d, prot:%d, flags:%d, fd:%d, offset:%d)",
+  TRACE("armeabi_mmap(size:0x%X, prot:0x%X, flags:0x%X, fd:%p, offset:%d)",
 	size, prot, flags, fd, offset);
 
   if (size == 0)
@@ -325,6 +326,29 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
 
   if (flags & MAP_FIXED)
     return armeabisupport_bad_param;
+
+  shm_object *shm = NULL;
+  if (fd != -1 && (void *)fd > (void *)0x8000)
+    {
+      TRACE("armeabi_mmap: shm detected, fd = %p", (void *)fd);
+      shm = (shm_object *)fd;
+      if (shm->valid != VALID_SHM)
+	{
+	  LOG("armeabi_mmap: Invalid shm @ %p", (void *)fd);
+	  return armeabisupport_bad_param;
+	}
+
+      if (shm->block != NULL)
+	{
+	  /* We've already got a memory allocation for this shared memory object.  */
+	  *allocator_ret = shm->allocator;
+	  *block_ret = shm->block;
+	  shm->ref_count++;
+	  TRACE("armeabi_mmap: shm %p already connected to mmap, name=\"%s\", ref=%d, addr=%p",
+		 shm, shm->name, shm->ref_count, page_to_addr(&shm->allocator->base, shm->block->start_page));
+	  return NULL;
+	}
+    }
 
   armeabisupport_allocator *allocator;
   _kernel_oserror *err;
@@ -381,6 +405,15 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
 
 	*allocator_ret = (armeabisupport_allocator_mmap *)allocator;
 	*block_ret = block;
+
+	if (shm)
+	  {
+	    shm->allocator = (armeabisupport_allocator_mmap *)allocator;
+	    shm->block = block;
+	    shm->ref_count++;
+	    TRACE("armeabi_mmap: shm %p connecting to mmap, name=\"%s\", ref=%d, addr=%p",
+		  shm, shm->name, shm->ref_count, page_to_addr(&shm->allocator->base, shm->block->start_page));
+	  }
         TRACE("armeabi_mmap: Allocated %d pages from allocator %s\n", num_pages, allocator->name);
         return NULL;
       }
@@ -535,7 +568,7 @@ armeabi_get_info(eabi_PTR addr,
   *handle = block->fd;
   *offset = block->offset;
 
-  TRACE("armeabi_get_info: addr=%p, mmap_addr=%p size=0x%X, prot=0x%X flags=0x%X, fd=%d, offset=%d",
+  TRACE("armeabi_get_info: addr=%p, mmap_addr=%p size=0x%X, prot=0x%X flags=0x%X, fd=%p, offset=%d",
 	addr, *mmap_addr, *size, *prot, *flags, *handle, *offset);
 
   return NULL;

@@ -31,9 +31,12 @@ error-identifiers: armeabisupport_bad_reason("Unknown ARMEABISupport SWI reason 
 		   armeabisupport_bad_process("Process not known to ARMEABISupport"),
 		   armeabisupport_in_use("There are still clients using ARMEABISupport"),
 		   armeabisupport_page_map_error("Page mapping error"),
-		   armeabisupport_EACCES("EACCES"),
-		   armeabisupport_EEXIST("EEXIST"),
-		   armeabisupport_EINVAL("EINVAL"),
-		   armeabisupport_ENAMETOOLONG("ENAMETOOLONG"),
-		   armeabisupport_ENOENT("ENOENT"),
-		   armeabisupport_ENOSPC("ENOSPC")
+		   armeabisupport_EACCES("EACCES: Access denied"),
+		   armeabisupport_EEXIST("EEXIST: Already exists"),
+		   armeabisupport_EINVAL("EINVAL: Invalid input"),
+		   armeabisupport_ENAMETOOLONG("ENAMETOOLONG: Name too long"),
+		   armeabisupport_ENOENT("ENOENT: Does not exist"),
+		   armeabisupport_ENOSPC("ENOSPC: No space"),
+		   armeabisupport_EBADF("EBADF: Not a valid file descriptor"),
+		   armeabisupport_ENOMEM("ENOMEM: No memory is available"),
+		   armeabisupport_EOPSYS("EOPSYS: RISC OS system error")

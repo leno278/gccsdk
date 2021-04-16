@@ -10,12 +10,19 @@
 #include "types.h"
 
 #define VALID_SHM 0x304D4853	/* SHM0 */
+#define FD_TYPE_INVALID 0
+#define FD_TYPE_SHM 1
+
+#define IS_SHM_FD(fd) ((fd) != -1 && (void *)fd > (void *)0x8000)
 
 typedef struct shm_object
 {
   link_hdr link;
 
   uint32_t valid;
+
+  /* In case we wish to expand the shared fd idea in the future.  */
+  int fd_type;
 
   armeabisupport_allocator_mmap *allocator;
   mmap_block *block;

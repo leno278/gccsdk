@@ -146,6 +146,7 @@ create_shm_object(const char *name, shm_object **result)
 
   strcpy(shm->name, name);
   shm->valid = VALID_SHM;
+  shm->fd_type = FD_TYPE_SHM;
   shm->ref_count = 2;
   shm->linked = true;
 
@@ -270,6 +271,7 @@ bool shm_deref_object(shm_object *shm)
 	rma_free(shm->name);
 
       shm->valid = 0;
+      shm->fd_type = FD_TYPE_INVALID;
       rma_free(shm);
 
       return true;

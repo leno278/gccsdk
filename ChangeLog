@@ -1,8 +1,18 @@
+Sat Jan  7 16:12:52 GMT 2023  Lee Noar  <lee.noar@sky.com>
+
+	* memory.c(allocator_munmap): Fix zero pain; check that there is a last block
+	before trying to use it to set the DA size.
+	* shm.c: White space (indenting) change.
+	* configure.ac: Bump version to v1.05.
+
 Tue Dec 21 13:21:51 GMT 2021  Lee Noar  <lee.noar@sky.com>
 
 	* mmap-asm.s: Some additional comments.
 	* shm.c: Add dup op to shm. This simply increases the ref count and
-	returns the same handle.
+	returns the same handle. The standard states that dup() will return
+	the lowest fd, but that isn't possible here. However, as that is usually
+	used to redirect stdout/stderr to another file, it shouldn't be an issue
+	with shared memory.
 	Start the ref count from 1 rather than 2, now that dup() is catered for.
 	* configure.ac: Bump version to v1.04.
 

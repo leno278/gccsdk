@@ -1,6 +1,6 @@
 /* types.h
  *
- * Copyright 2019-2021 GCCSDK Developers
+ * Copyright 2019-2024 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -59,6 +59,8 @@ typedef struct dynamicarea_block
   /* The maximum number of pages available for allocation.
    * base + (max_size - 1) gives the last addressable page. */
   size_t max_size;
+
+  bool aborttrap_enabled;
 } dynamicarea_block;
 
 typedef struct _stack_abort_data_object

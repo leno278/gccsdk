@@ -10,23 +10,6 @@
 #include "swi.h"
 #include "debug.h"
 
-#define DYNAMICAREA_FLAG_REQUIRES_SPECIFIC_PAGES	(1 << 8)
-#define DYNAMICAREA_FLAG_ABORTABLE			(1 << 16)
-#define DYNAMICAREA_FLAG_IS_PMP				(1 << 20)
-
-#define DYNAMICAREA_ACCESS_COMPLETELY_ABORTABLE		(1 << 9)
-
-#define ENABLE_TRACE 1
-
-#if ENABLE_TRACE
-#define TRACE(format, ...) \
-do {\
-reporter_printf(format, ##__VA_ARGS__); \
-} while (0)
-#else
-#define TRACE(format, ...)
-#endif
-
 extern _kernel_oserror *da_handler(void);
 
 static _kernel_oserror *
@@ -56,23 +39,15 @@ dynamic_area_create_pmp(const char *name,
   regs.r[9] = bytes_to_pages (max_size);
 
   err = _kernel_swi (XOS_Bit | OS_DynamicArea, &regs, &regs);
-  /* If there's an error, assume that it's because aborttrap isn't supported and
-   * try again without.  */
   if (!err)
     {
       ret->number = regs.r[1];
       ret->base = (eabi_PTR)regs.r[3];
       ret->size = bytes_to_pages (initial_size);
       ret->max_size = bytes_to_pages (max_size);
-
-      regs.r[0] = 24;
-      regs.r[1] = ret->base;
-      regs.r[2] = ret->base + ret->size;
-      _kernel_swi(XOS_Bit | OS_Memory, &regs, &regs);
-      ret->aborttrap_enabled = ((regs.r[1] & DYNAMICAREA_ACCESS_COMPLETELY_ABORTABLE) ==
-				    DYNAMICAREA_ACCESS_COMPLETELY_ABORTABLE);
-      TRACE("Dynamic area \'%s\' supports aborttrap = %d",name, ret->aborttrap_enabled);
-   }
+    }
+  else
+    ret->number = -1;
 
   return err;
 }
@@ -109,7 +84,6 @@ dynamic_area_create_non_pmp(const char *name, int max_size,
       ret->base = (eabi_PTR)regs.r[3];
       ret->size = bytes_to_pages (initial_size);
       ret->max_size = bytes_to_pages (max_size);
-      ret->aborttrap_enabled = false;
     }
 
   return err;

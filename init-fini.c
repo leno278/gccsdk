@@ -105,6 +105,21 @@ _kernel_oserror *module_initialise (const char *tail, int podule_base, void *pw)
 		     OS_PERMISSION_FLAG_PRIV_READ | OS_PERMISSION_FLAG_PRIV_WRITE | OS_PERMISSION_FLAG_PRIV_EXEC |
 		     OS_PERMISSION_FLAG_USER_READ | OS_PERMISSION_FLAG_USER_WRITE | OS_PERMISSION_FLAG_USER_EXEC,
 		     &global.os_memory_prot_none);
+
+  dynamicarea_block test_da;
+  dynamic_area_create("abort-test", 4096, ALLOCATOR_TYPE_PAGE, &test_da);
+
+  _kernel_swi_regs regs;
+  regs.r[0] = 24;		// Check memory access
+  regs.r[1] = (int)test_da.base;
+  regs.r[2] = (int)test_da.base + test_da.size;
+  _kernel_swi(XOS_Bit | OS_Memory, &regs, &regs);
+  global.aborttrap_enabled = ((regs.r[1] & DYNAMICAREA_ACCESS_COMPLETELY_ABORTABLE) ==
+				    DYNAMICAREA_ACCESS_COMPLETELY_ABORTABLE);
+  dynamic_area_remove(test_da.number);
+
+  TRACE("Dynamic areas support aborttrap = %d", global.aborttrap_enabled);
+
   return NULL;
 
 error:

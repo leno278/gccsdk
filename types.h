@@ -60,7 +60,6 @@ typedef struct dynamicarea_block
    * base + (max_size - 1) gives the last addressable page. */
   size_t max_size;
 
-  bool aborttrap_enabled;
 } dynamicarea_block;
 
 typedef struct _stack_abort_data_object
@@ -89,6 +88,8 @@ typedef struct armeabisupport_globals
   link_list shm_object_list;
   bool pre_filter_installed;
   bool post_filter_installed;
+  bool aborttrap_enabled;
+
   unsigned os_memory_prot_none;
   unsigned os_memory_prot_read;
   unsigned os_memory_prot_read_write;

@@ -85,6 +85,8 @@ dynamic_area_create_non_pmp(const char *name, int max_size,
       ret->size = bytes_to_pages (initial_size);
       ret->max_size = bytes_to_pages (max_size);
     }
+  else
+    ret->number = -1;
 
   return err;
 }

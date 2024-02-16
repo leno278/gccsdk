@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <kernel.h>
 #include "memory.h"
+#include "abort.h"
 #include "swi.h"
 #include "debug.h"
 
@@ -34,8 +35,8 @@ dynamic_area_create_pmp(const char *name,
 		DYNAMICAREA_FLAG_ABORTABLE);
   regs.r[5] = max_size;
   regs.r[6] = (int)da_handler;
-  regs.r[7] = -1;
-  regs.r[8] = (int) name;
+  regs.r[7] = (int)get_data_abort_support_block();;
+  regs.r[8] = (int)name;
   regs.r[9] = bytes_to_pages (max_size);
 
   err = _kernel_swi (XOS_Bit | OS_DynamicArea, &regs, &regs);

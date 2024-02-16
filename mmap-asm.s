@@ -8,7 +8,6 @@
 
 @ Entry:
 @  r1 = address of fault
-@  r11 = ptr to register block (r0-r15, cpu flags)
 @  r12 = ptr to user data
 @ Exit:
 @  r0 = bits 0-7: ABORT_HANDLER_CLAIM if able to handle, ABORT_HANDLER_ERROR if there was an
@@ -17,26 +16,32 @@
 @  r12 can be corrupted
 @  All other registers preserved
 mmap_abort_handler:
-	STMFD	sp!, {r1-r8, r10-r11, lr}
+	STMFD	sp!, {r1-r8, r10, lr}
+REPORT_TEXT "mmap_abort_handler"
+REPORT_HEX r1
 
 	LDR	r10, [r12, #LINKLIST_FIRST]
 	@ r10 = mmap object
 0:
 	TEQ	r10, #0
 	MOVEQ	r0, #ABORT_HANDLER_PASS_ON
-	LDMEQFD	sp!, {r1-r8, r10-r11, pc}	@ End of allocator list, pass on
-
+	LDMEQFD	sp!, {r1-r8, r10, pc}	@ End of allocator list, pass on
+REPORT_TEXT "mmap object:"
+REPORT_HEX r10
 	@ Check if the addresss is lower than the dynamic area base address
 	LDR	r7, [r10, #MMAP_ALLOCATOR + ALLOCATOR_DA + DA_START]
+REPORT_HEX r7
 	CMP	r1, r7
 	LDRLO	r10, [r10, #MMAP_ALLOCATOR + ALLOCATOR_LINK + LINKHDR_NEXT]
 	BLO	0b	@ It is, continue to the next allocator in the pool
 	@ Check if the address is higher than the last addressable page in the dynamic area
 	LDR	r2, [r10, #MMAP_ALLOCATOR + ALLOCATOR_DA + DA_SIZE]
 	ADD	r2, r7, r2, LSL#PAGE_SHIFT	@ End address of dynamic area
+REPORT_HEX r2
 	CMP	r1, r2
 	LDRHS	r10, [r10, #MMAP_ALLOCATOR + ALLOCATOR_LINK + LINKHDR_NEXT]
 	BHS	0b	@ It is, continue to the next allocator in the pool
+REPORT_TEXT "mmap object found"
 
 	@ We've found the mmap allocator (r10), now find the block
 	LDR	r8, [r10, #MMAP_ALLOCATOR_BLOCK_LIST + LINKLIST_FIRST]
@@ -45,13 +50,15 @@ mmap_abort_handler:
 	@ a program trying to use a freed block.
 	TEQ	r8, #0
 	MOVEQ	r0, #ABORT_HANDLER_PASS_ON
-	LDMEQFD	sp!, {r1-r8, r10-r11, pc}	@ End of block list, pass on
-
+	LDMEQFD	sp!, {r1-r8, r10, pc}	@ End of block list, pass on
+REPORT_TEXT "mmap block:"
+REPORT_HEX r8
 	@ The block list is kept in ascending address order
 	@ r7 = Base address of dynamic area
 	@ r8 = MMap block
 	LDR	r2, [r8, #MMAP_BLOCK_END_PAGE]
 	ADD	r2, r7, r2, LSL#PAGE_SHIFT		@ Convert page number to address
+REPORT_HEX r2
 	@ If the fault address is higher than the end of this block, then that eliminates
 	@ this block as a candidate.
 	CMP	r1, r2
@@ -64,8 +71,10 @@ mmap_abort_handler:
 	@ an unallocated region.
 	LDR	r2, [r8, #MMAP_BLOCK_START_PAGE]
 	ADD	r2, r7, r2, LSL#PAGE_SHIFT
+REPORT_HEX r2
 	CMP	r1, r2
 	BLO	mmapabort_mmap_area
+REPORT_TEXT "mmap block found"
 
 	@ Found a valid mmap block, map the page in
 	SUB	r4, r1, r7				@ fault address - da base address
@@ -121,18 +130,18 @@ mmap_abort_handler:
 
 mmapabort_claim:
 	MOV	r0, #ABORT_HANDLER_CLAIM
-	LDMFD	sp!, {r1-r8, r10-r11, pc}
+	LDMFD	sp!, {r1-r8, r10, pc}
 mmapabort_pass_on:
 	MOV	r0, #ABORT_HANDLER_PASS_ON
-	LDMFD	sp!, {r1-r8, r10-r11, pc}
+	LDMFD	sp!, {r1-r8, r10, pc}
 mmapabort_swi_error:
 	MOV	r0, #ABORT_HANDLER_ERROR
 	ORR	r0, r0, #(ABORT_ERROR_MMAP_INTERNAL << 8)
-	LDMFD	sp!, {r1-r8, r10-r11, pc}
+	LDMFD	sp!, {r1-r8, r10, pc}
 mmapabort_mmap_area:
 	MOV	r0, #ABORT_HANDLER_ERROR
 	ORR	r0, r0, #(ABORT_ERROR_MMAP_AREA << 8)
-	LDMFD	sp!, {r1-r8, r10-r11, pc}
+	LDMFD	sp!, {r1-r8, r10, pc}
 
 	.global	get_mmap_abort_handler
 get_mmap_abort_handler:

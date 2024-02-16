@@ -8,7 +8,6 @@
 
 @ Entry:
 @  r1 = address of fault
-@  r11 = ptr to register block (r0-r15, cpu flags)
 @  r12 = ptr to user data block
 @		stack_abort_data_object
 @		+0 - ptr to app stack list
@@ -20,7 +19,10 @@
 @  r12 can be corrupted
 @  All other registers preserved
 stack_abort_handler:
-	STMFD	sp!, {r1-r8, r10-r11, lr}
+	STMFD	sp!, {r1-r8, r10, lr}
+
+	REPORT_TEXT "stack_abort_handler"
+	REPORT_HEX r1
 
 	LDR	r10, [r12, #STACK_ABORT_BLOCK_STACK_LIST]
 	LDR	r10, [r10, #LINKLIST_FIRST]
@@ -28,10 +30,13 @@ stack_abort_handler:
 0:
 	TEQ	r10, #0
 	MOVEQ	r0, #ABORT_HANDLER_PASS_ON
-	LDMEQFD	sp!, {r1-r8, r10-r11, pc}
+	LDMEQFD	sp!, {r1-r8, r10, pc}
 
 	LDR	r2, [r10, #STACK_BASE]
 	LDR	r3, [r10, #STACK_TOP]
+	REPORT_TEXT "stack base,top"
+	REPORT_HEX r2
+	REPORT_HEX r3
 	CMP	r1, r2
 	LDRLO	r10, [r10, #STACK_LINK + LINKHDR_NEXT]
 	BLO	0b
@@ -45,6 +50,7 @@ stack_abort_handler:
 	CMP	r1, r4					@ If we're lower than that, then we really do
 	BLO	stackabort_overflow			@ have a stack overflow
 
+	REPORT_TEXT "mapping page"
 	LDR	r8, [r12, #STACK_ABORT_BLOCK_STACK_ALLOCATOR]	@ ptr to ptr
 	LDR	r8, [r8, #0]					@ Get actual allocator ptr
 	@ r8 = stack allocator object
@@ -59,6 +65,8 @@ stack_abort_handler:
 	MOV	r0, #OSDYNAMICAREA_REASON_PHYSICALOP	@ Claim the relevent page
 	LDR	r1, [r8, #ALLOCATOR_DA + DA_NUMBER]
 
+	REPORT_TEXT "da num"
+	REPORT_DEC r1
 	MOV	r2, sp
 	MOV	r3, #1
 	SWI	XOS_DynamicArea
@@ -79,18 +87,18 @@ stack_abort_handler:
 
 stackabort_claim:
 	MOV	r0, #ABORT_HANDLER_CLAIM
-	LDMFD	sp!, {r1-r8, r10-r11, pc}
+	LDMFD	sp!, {r1-r8, r10, pc}
 stackabort_pass_on:
 	MOV	r0, #ABORT_HANDLER_PASS_ON
-	LDMFD	sp!, {r1-r8, r10-r11, pc}
+	LDMFD	sp!, {r1-r8, r10, pc}
 stackabort_overflow:
 	MOV	r0, #ABORT_HANDLER_ERROR
 	ORR	r0, r0, #(ABORT_ERROR_STACK_OVERFLOW << 8)
-	LDMFD	sp!, {r1-r8, r10-r11, pc}
+	LDMFD	sp!, {r1-r8, r10, pc}
 stackabort_swi_error:
 	MOV	r0, #ABORT_HANDLER_ERROR
 	ORR	r0, r0, #(ABORT_ERROR_STACK_INTERNAL << 8)
-	LDMFD	sp!, {r1-r8, r10-r11, pc}
+	LDMFD	sp!, {r1-r8, r10, pc}
 
 	.global	get_stack_abort_handler
 get_stack_abort_handler:

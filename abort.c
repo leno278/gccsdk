@@ -52,25 +52,21 @@ abort_op(_kernel_swi_regs *r)
 
   switch (reason)
   {
-    case ABORTOP_REGISTER: {
+    case ABORTOP_REGISTER:
       err = abort_register((void *)r->r[1], (unsigned)r->r[2]);
       break;
-    }
-    case ABORTOP_DEREGISTER: {
+    case ABORTOP_DEREGISTER:
       err = abort_deregister((void *)r->r[1], (unsigned)r->r[2]);
       break;
-    }
-    case ABORTOP_INSTALL: {
-      err = abort_install();
+    case ABORTOP_INSTALL:
+      err = !global.aborttrap_enabled ? abort_install() : NULL;
       break;
-    }
-    case ABORTOP_REMOVE: {
-      err = abort_remove();
+    case ABORTOP_REMOVE:
+      err = !global.aborttrap_enabled ? abort_remove() : NULL;
       break;
     case ABORTOP_READ_STATUS:
       r->r[0] = abort_read_error_status();
       break;
-    }
   }
 
   if (err)

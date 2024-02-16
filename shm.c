@@ -23,7 +23,8 @@
 #define SHMOP_DUP	3
 
 #define LOGGING 0
-#define TRACING 0
+#define TRACING 1
+#define TRACE_SWIS 1
 
 #if LOGGING
 #define LOG(format,...) reporter_printf(format, ##__VA_ARGS__)
@@ -31,10 +32,17 @@
 #define LOG(format,...)
 #endif
 
+#undef TRACE
 #if TRACING
 #define TRACE(format,...) reporter_printf(format, ##__VA_ARGS__)
 #else
 #define TRACE(format,...)
+#endif
+
+#if TRACE_SWIS
+#define TRACE_SWI(format,...) reporter_printf(format, ##__VA_ARGS__)
+#else
+#define TRACE_SWI(format,...)
 #endif
 
 /* r0 = reason code:
@@ -80,23 +88,36 @@ shm_op(_kernel_swi_regs *r)
   {
   case SHMOP_OPEN: {
     shm_object *result;
+    TRACE_SWI("SWI \"SHMOp\", SHMOP_OPEN, name=\"%s\", oflag=0x%X, mode=0x%X", r->r[1], r->r[2], r->r[3]);
+
     err = shm_open((const char *)r->r[1], r->r[2], r->r[3], &result);
     if (!err)
-      r->r[0] = (int)result;
+      {
+	r->r[0] = (int)result;
+	TRACE_SWI("  Result = 0x%X", r->r[0]);
+      }
     break;
   }
   case SHMOP_UNLINK:
+    TRACE_SWI("SWI \"SHMOp\", SHMOP_UNLINK, name=\"%s\"", r->r[1]);
     err = shm_unlink((const char *)r->r[1]);
     break;
   case SHMOP_CLOSE:
+    TRACE_SWI("SWI \"SHMOp\", SHMOP_CLOSE, fd=0x%X", r->r[1]);
     err = shm_close((shm_object *)r->r[1]);
     break;
   case SHMOP_DUP:
+    TRACE_SWI("SWI \"SHMOp\", SHMOP_DUP, fd=0x%X", r->r[1]);
     err = shm_dup((shm_object *)r->r[1]);
     if (!err)
       r->r[0] = r->r[1];
     break;
   }
+
+  if (err)
+    {
+      TRACE_SWI("  Error = %s", err->errmess);
+    }
 
   return err;
 }
@@ -166,8 +187,6 @@ create_shm_object(const char *name, shm_object **result)
 
   linklist_add_to_end(&global.shm_object_list, &shm->link);
 
-  LOG("Created shared memory object \"%s\" @ node %p", name, shm);
-
   *result = shm;
 
   return NULL;
@@ -190,8 +209,6 @@ shm_open(const char *name, int oflag, int mode, shm_object **result)
 {
   _kernel_oserror *err;
   shm_object *obj;
-
-  TRACE("shm_open(\"%s\", %X, %X)", name, oflag, mode);
 
   if (strlen(name) > PATH_MAX)
     {
@@ -217,13 +234,13 @@ shm_open(const char *name, int oflag, int mode, shm_object **result)
 
   if (obj)
     {
-      LOG("Found existing shared memory object \"%s\"", name);
+      TRACE("Found existing shared memory object \"%s\", ref now %d", name, obj->ref_count + 1);
       obj->ref_count++;
       *result = obj;
       return NULL;
     }
 
-  LOG("Creating shared memory object \"%s\"", name);
+  TRACE("Creating shared memory object \"%s\"", name);
   err = create_shm_object(name, result);
 
   return err;
@@ -262,7 +279,7 @@ shm_close(shm_object *shm)
   if (shm->valid != VALID_SHM)
     return armeabisupport_EINVAL;
 
-  TRACE("shm_close(%p) name=\"%s\"", shm, shm->name);
+  TRACE("shm_close(0x%X) name=\"%s\"", shm, shm->name);
 
   shm_deref_object(shm);
 
@@ -274,11 +291,10 @@ bool shm_deref_object(shm_object *shm)
   if (shm->valid != VALID_SHM)
     return false;
 
-  if (shm->ref_count > 0)
-    shm->ref_count--;
-  else
+  if (--shm->ref_count == 0)
     {
-      TRACE("shm_deref_object: deleting shared memory object %p, \"%s\", unmapping memory", shm, shm->name);
+      TRACE("shm_deref_object: deleting shared memory object 0x%X, \"%s\", unmapping memory 0x%X",
+	    shm, shm->name, page_to_addr(&shm->allocator->base, shm->block->start_page));
 
       linklist_remove(&global.shm_object_list, &shm->link);
       allocator_munmap_block(shm->allocator, shm->block);
@@ -293,7 +309,8 @@ bool shm_deref_object(shm_object *shm)
       return true;
     }
 
-  TRACE("shm_deref_object: shared memory object %p, \"%s\", ref=%d", shm, shm->name, shm->ref_count);
+  TRACE("shm_deref_object: shared memory object 0x%X, new ref=%d, addr=0x%X, \"%s\"",
+	shm, shm->ref_count, page_to_addr(&shm->allocator->base, shm->block->start_page), shm->name);
 
   return false;
 }
@@ -328,6 +345,8 @@ shm_dup(shm_object *shm)
     return armeabisupport_EBADF;
 
   shm->ref_count++;
+  TRACE("shm_dup: shared memory object 0x%X, new ref=%d, addr=0x%X, \"%s\"",
+	shm, shm->ref_count, page_to_addr(&shm->allocator->base, shm->block->start_page), shm->name);
 
   return NULL;
 }

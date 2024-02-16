@@ -14,7 +14,7 @@
 #include "swi.h"
 #include "types.h"
 
-//#define NO_STACK_ABORT_HANDLER 1
+#define NO_STACK_ABORT_HANDLER 0
 
 static const char *default_stack_name = "<unnamed>";
 static const char *stack_da_name = "UnixLib stacks";
@@ -149,7 +149,7 @@ stack_alloc(unsigned page_count, unsigned num_guard_pages, const char *name,
   if (err)
     return err;
 
-#ifdef NO_STACK_ABORT_HANDLER
+#if NO_STACK_ABORT_HANDLER
   /* Claim/map the whole stack.  */
   err = allocator_claim_pages(allocator, block + (num_guard_pages << PAGE_SHIFT), page_count);
   if (err)
@@ -205,7 +205,7 @@ error__mapped:
 error__claimed:
   allocator_release_pages(allocator, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
 error__alloced:
-#ifdef NO_STACK_ABORT_HANDLER
+#if NO_STACK_ABORT_HANDLER
   allocator_free(allocator, block);
 #else
   allocator_free(allocator, block);

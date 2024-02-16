@@ -17,7 +17,8 @@
 #include <string.h>
 
 #define LOGGING 0
-#define TRACING 0
+#define TRACING 1
+#define TRACE_SWIS 1
 
 #define MMAP_MAX_DA_SIZE (100 * 1024 * 1024)
 
@@ -36,10 +37,17 @@
 #define LOG(format,...)
 #endif
 
+#undef TRACE
 #if TRACING
 #define TRACE(format,...) reporter_printf(format, ##__VA_ARGS__)
 #else
 #define TRACE(format,...)
+#endif
+
+#if TRACE_SWIS
+#define TRACE_SWI(format,...) reporter_printf(format, ##__VA_ARGS__)
+#else
+#define TRACE_SWI(format,...)
 #endif
 
 static _kernel_oserror *
@@ -139,6 +147,8 @@ mmap_op(_kernel_swi_regs *r)
     case MMAPOP_MAP: {
       armeabisupport_allocator_mmap *allocator;
       mmap_block *block;
+      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_MAP, addr:0x%X, size:0x%X, prot:0x%X, flags:0x%X, fd:0x%X, offset:%d",
+		r->r[1], r->r[2], r->r[3], r->r[4], r->r[5], r->r[6]);
       err = armeabi_mmap((eabi_PTR)r->r[1],
 			 (size_t)r->r[2],
 			 r->r[3],
@@ -148,19 +158,28 @@ mmap_op(_kernel_swi_regs *r)
 			 &allocator,
 			 &block);
       if (!err)
-	r->r[0] = (int)page_to_addr(&allocator->base, block->start_page);
+	{
+	  r->r[0] = (int)page_to_addr(&allocator->base, block->start_page);
+	  TRACE_SWI("  Result = 0x%X", r->r[0]);
+	}
       break;
     }
     case MMAPOP_UNMAP:
+      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_UNMAP, addr:0x%X, size:0x%X",
+		r->r[1], r->r[2]);
       err = armeabi_munmap((eabi_PTR)r->r[1],
 			   (size_t)r->r[2]);
       break;
     case MMAPOP_ADVISE:
+      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_ADVISE, addr:0x%X, size:0x%X, advice:%d",
+		r->r[1], r->r[2], r->r[3]);
       err = armeabi_madvise((eabi_PTR)r->r[1],
 			    (size_t)r->r[2],
 			    r->r[3]);
       break;
     case MMAPOP_PROTECT:
+      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_PROTECT, addr:0x%X, size:0x%X, prot:%d",
+		r->r[1], r->r[2], r->r[3]);
       err = armeabi_mprotect((eabi_PTR)r->r[1],
 			     (size_t)r->r[2],
 			     r->r[3]);
@@ -191,6 +210,8 @@ mmap_op(_kernel_swi_regs *r)
       armeabisupport_allocator_mmap *allocator;
       mmap_block *block;
 
+      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_REMAP, addr:0x%X, old_size:0x%X, new_size:0x%X, flags:0x%X",
+		r->r[1], r->r[2], r->r[3], r->r[4]);
       err = armeabi_mremap((eabi_PTR)r->r[1],
 			   (size_t)r->r[2],
 			   (size_t)r->r[3],
@@ -198,7 +219,10 @@ mmap_op(_kernel_swi_regs *r)
 			   &allocator,
 			   &block);
       if (!err)
-	r->r[0] = (int)page_to_addr(&allocator->base, block->start_page);
+	{
+	  r->r[0] = (int)page_to_addr(&allocator->base, block->start_page);
+	  TRACE_SWI("  Result = 0x%X", r->r[0]);
+	}
       break;
     }
     case MMAPOP_GET_PROT: {
@@ -213,6 +237,11 @@ mmap_op(_kernel_swi_regs *r)
       mmap_dump();
       break;
   }
+
+  if (err)
+    {
+      TRACE_SWI("  Error = %s", err->errmess);
+    }
 
   return err;
 }
@@ -264,7 +293,7 @@ static _kernel_oserror *convert_protection(int prot, uint32_t *access_flags_ret)
 static _kernel_oserror *
 armeabi_mmap_non_null_addr(eabi_PTR addr, size_t size, int prot, armeabisupport_allocator_mmap **allocator_ret, mmap_block **block_ret)
 {
-  TRACE("armeabi_mmap_non_null_addr(%p, %d, %d)", addr, size, prot);
+  TRACE("armeabi_mmap_non_null_addr(0x%X, %d, %d)", addr, size, prot);
 
   _kernel_oserror *err;
   armeabisupport_allocator_mmap *allocator = get_allocator(addr);
@@ -315,9 +344,6 @@ _kernel_oserror *
 armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t offset,
 	     armeabisupport_allocator_mmap **allocator_ret, mmap_block **block_ret)
 {
-  TRACE("armeabi_mmap(size:0x%X, prot:0x%X, flags:0x%X, fd:%p, offset:%d)",
-	size, prot, flags, fd, offset);
-
   if (size == 0)
     return armeabisupport_EINVAL;
 
@@ -330,11 +356,11 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
   shm_object *shm = NULL;
   if (IS_SHM_FD(fd))
     {
-      TRACE("armeabi_mmap: shm detected, fd = %p", (void *)fd);
+      TRACE("armeabi_mmap: shm detected, fd=0x%X", (void *)fd);
       shm = (shm_object *)fd;
       if (shm->valid != VALID_SHM)
 	{
-	  LOG("armeabi_mmap: Invalid shm @ %p", (void *)fd);
+	  LOG("armeabi_mmap: Invalid shm @ 0x%X", (void *)fd);
 	  return armeabisupport_EBADF;
 	}
 
@@ -344,7 +370,7 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
 	  *allocator_ret = shm->allocator;
 	  *block_ret = shm->block;
 	  shm->ref_count++;
-	  TRACE("armeabi_mmap: shm %p already connected to mmap, name=\"%s\", ref=%d, addr=%p",
+	  TRACE("armeabi_mmap: shm 0x%X already connected to mmap, name=\"%s\", new ref=%d, addr=%p",
 		 shm, shm->name, shm->ref_count, page_to_addr(&shm->allocator->base, shm->block->start_page));
 	  return NULL;
 	}
@@ -411,7 +437,7 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
 	    shm->allocator = (armeabisupport_allocator_mmap *)allocator;
 	    shm->block = block;
 	    shm->ref_count++;
-	    TRACE("armeabi_mmap: shm %p connecting to mmap, name=\"%s\", ref=%d, addr=%p",
+	    TRACE("armeabi_mmap: shm 0x%X connecting to mmap, name=\"%s\", new ref=%d, addr=%p",
 		  shm, shm->name, shm->ref_count, page_to_addr(&shm->allocator->base, shm->block->start_page));
 	  }
         TRACE("armeabi_mmap: Allocated %d pages from allocator %s\n", num_pages, allocator->name);
@@ -428,8 +454,6 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
 _kernel_oserror *
 armeabi_munmap(eabi_PTR addr, size_t size)
 {
-  TRACE("armeabi_munmap(%p, %d (0x%X))\n", addr, size, size);
-
   uint32_t num_pages = bytes_to_pages(size);
 
   armeabisupport_allocator_mmap *allocator = get_allocator(addr);
@@ -516,8 +540,6 @@ void mmap_cleanup_app(app_object *app)
 _kernel_oserror *
 armeabi_mprotect(void *addr, size_t len, int prot)
 {
-  TRACE("armeabi_mprotect(%p, 0x%X, %d)", addr, len, prot);
-
   /* The caller should already have checked this.  */
   if (!is_page_aligned(addr) || len == 0)
     return armeabisupport_EINVAL;
@@ -568,7 +590,7 @@ armeabi_get_info(eabi_PTR addr,
   *handle = block->fd;
   *offset = block->offset;
 
-  TRACE("armeabi_get_info: addr=%p, mmap_addr=%p size=0x%X, prot=0x%X flags=0x%X, fd=%p, offset=%d",
+  TRACE("armeabi_get_info: addr=0x%X, mmap_addr=0x%X size=0x%X, prot=0x%X flags=0x%X, fd=0x%X, offset=%d",
 	addr, *mmap_addr, *size, *prot, *flags, *handle, *offset);
 
   return NULL;
@@ -582,9 +604,6 @@ armeabi_mremap (eabi_PTR addr,
 		armeabisupport_allocator_mmap **allocator_ret,
 		mmap_block **block_ret)
 {
-  TRACE("armeabi_mremap: addr=%p, old=%X, new=%X, flags=%X",
-	addr, old_len, new_len, flags);
-
   _kernel_oserror *err;
 
   if (new_len == 0)

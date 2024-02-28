@@ -1,6 +1,6 @@
 /* abort.c
  *
- * Copyright (c) 2019 GCCSDK Developers
+ * Copyright (c) 2019-2024 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -42,6 +42,13 @@
 *	  None
 *	 Exit:
 *	  r0 = Error code
+*	5 - Get flags
+*	 Entry:
+*	  None
+*	 Exit:
+*	  r0 = flags
+*	    bit 0 - 1 = abortable dynamic areas are supported and used
+*		    0 = abortable dynamic areas not supported, using built in abort handler instead
 */
 
 _kernel_oserror *
@@ -66,6 +73,9 @@ abort_op(_kernel_swi_regs *r)
       break;
     case ABORTOP_READ_STATUS:
       r->r[0] = abort_read_error_status();
+      break;
+    case ABORTOP_GET_FLAGS:
+      r->r[0] = global.aborttrap_enabled;
       break;
   }
 

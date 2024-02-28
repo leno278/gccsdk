@@ -1,6 +1,6 @@
 /* mmap.c
  *
- * Copyright 2021 GCCSDK Developers
+ * Copyright 2021-2024 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -9,16 +9,18 @@
 #include "memory.h"
 #include "abort.h"
 #include "shm.h"
+#include "filedesc.h"
 #include "main.h"
 #include "swi.h"
 #include "debug.h"
 #include <stdio.h>
+#include <stdbool.h>
 #include <sys/mman.h>
 #include <string.h>
 
 #define LOGGING 0
-#define TRACING 1
-#define TRACE_SWIS 1
+#define TRACING 0
+#define TRACE_SWIS 0
 
 #define MMAP_MAX_DA_SIZE (100 * 1024 * 1024)
 
@@ -147,7 +149,7 @@ mmap_op(_kernel_swi_regs *r)
     case MMAPOP_MAP: {
       armeabisupport_allocator_mmap *allocator;
       mmap_block *block;
-      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_MAP, addr:0x%X, size:0x%X, prot:0x%X, flags:0x%X, fd:0x%X, offset:%d",
+      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_MAP, addr=0x%X, size=0x%X, prot=0x%X, flags=0x%X, fd=%d, offset:%d",
 		r->r[1], r->r[2], r->r[3], r->r[4], r->r[5], r->r[6]);
       err = armeabi_mmap((eabi_PTR)r->r[1],
 			 (size_t)r->r[2],
@@ -165,20 +167,20 @@ mmap_op(_kernel_swi_regs *r)
       break;
     }
     case MMAPOP_UNMAP:
-      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_UNMAP, addr:0x%X, size:0x%X",
+      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_UNMAP, addr=0x%X, size=0x%X",
 		r->r[1], r->r[2]);
       err = armeabi_munmap((eabi_PTR)r->r[1],
 			   (size_t)r->r[2]);
       break;
     case MMAPOP_ADVISE:
-      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_ADVISE, addr:0x%X, size:0x%X, advice:%d",
+      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_ADVISE, addr=0x%X, size=0x%X, advice=%d",
 		r->r[1], r->r[2], r->r[3]);
       err = armeabi_madvise((eabi_PTR)r->r[1],
 			    (size_t)r->r[2],
 			    r->r[3]);
       break;
     case MMAPOP_PROTECT:
-      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_PROTECT, addr:0x%X, size:0x%X, prot:%d",
+      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_PROTECT, addr=0x%X, size=0x%X, prot=%d",
 		r->r[1], r->r[2], r->r[3]);
       err = armeabi_mprotect((eabi_PTR)r->r[1],
 			     (size_t)r->r[2],
@@ -210,7 +212,7 @@ mmap_op(_kernel_swi_regs *r)
       armeabisupport_allocator_mmap *allocator;
       mmap_block *block;
 
-      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_REMAP, addr:0x%X, old_size:0x%X, new_size:0x%X, flags:0x%X",
+      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_REMAP, addr=0x%X, old_size=0x%X, new_size=0x%X, flags=0x%X",
 		r->r[1], r->r[2], r->r[3], r->r[4]);
       err = armeabi_mremap((eabi_PTR)r->r[1],
 			   (size_t)r->r[2],
@@ -353,14 +355,22 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
   if (flags & MAP_FIXED)
     return armeabisupport_EINVAL;
 
-  shm_object *shm = NULL;
-  if (IS_SHM_FD(fd))
+  filedesc *shm_fd = filedesc_find_fd(fd);
+  if (fd != -1 && !shm_fd)
     {
-      TRACE("armeabi_mmap: shm detected, fd=0x%X", (void *)fd);
-      shm = (shm_object *)fd;
+      /* We were given a file descriptor, but it doesn't match any that we know of.  */
+      LOG("armeabi_mmap: Invalid fd (%d)", fd);
+      return armeabisupport_EBADF;
+    }
+
+  shm_object *shm = NULL;
+  if (shm_fd && shm_fd->type == fdtype_SHM)
+    {
+      TRACE("armeabi_mmap: shm detected, fd=%d", fd);
+      shm = shm_fd->shm;
       if (shm->valid != VALID_SHM)
 	{
-	  LOG("armeabi_mmap: Invalid shm @ 0x%X", (void *)fd);
+	  LOG("armeabi_mmap: Invalid shm, fd=%d", fd);
 	  return armeabisupport_EBADF;
 	}
 
@@ -370,7 +380,7 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
 	  *allocator_ret = shm->allocator;
 	  *block_ret = shm->block;
 	  shm->ref_count++;
-	  TRACE("armeabi_mmap: shm 0x%X already connected to mmap, name=\"%s\", new ref=%d, addr=%p",
+	  TRACE("armeabi_mmap: shm 0x%X already connected to mmap, name=\"%s\", new ref=%d, addr=0x%X",
 		 shm, shm->name, shm->ref_count, page_to_addr(&shm->allocator->base, shm->block->start_page));
 	  return NULL;
 	}
@@ -409,7 +419,10 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
 				     ALLOCATOR_TYPE_MMAP | ALLOCATOR_FLAG_GLOBAL,
 				     (void **)&allocator);
 	if (err)
-	  return err;
+	  {
+	    LOG("armeabi_mmap: Failed to create allocator with OS error: %s", err->errmess);
+	    return err;
+	  }
 
 	new_allocator = true;
 	linklist_add_to_end(&global.mmap_allocator_pool, &allocator->link);
@@ -425,7 +438,7 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
 	/* Record the owner of this block.  */
 	app_find(&block->owner);
 	block->fd = fd;
-	block->flags = flags;
+	block->mmap_flags = flags;
 	block->prot = prot;
 	block->offset = offset;
 
@@ -434,13 +447,15 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
 
 	if (shm)
 	  {
+	    block->is_shm = true;
 	    shm->allocator = (armeabisupport_allocator_mmap *)allocator;
 	    shm->block = block;
 	    shm->ref_count++;
-	    TRACE("armeabi_mmap: shm 0x%X connecting to mmap, name=\"%s\", new ref=%d, addr=%p",
+	    TRACE("armeabi_mmap: shm 0x%X connecting to mmap, name=\"%s\", new ref=%d, addr=0x%X",
 		  shm, shm->name, shm->ref_count, page_to_addr(&shm->allocator->base, shm->block->start_page));
 	  }
-        TRACE("armeabi_mmap: Allocated %d pages from allocator %s\n", num_pages, allocator->name);
+        TRACE("armeabi_mmap: Allocated %d pages @ 0x%X from allocator %s\n",
+	      num_pages, page_to_addr(allocator, block->start_page), allocator->name);
         return NULL;
       }
 
@@ -586,11 +601,11 @@ armeabi_get_info(eabi_PTR addr,
   *mmap_addr = page_to_addr(&allocator->base, block->start_page);
   *size = pages_to_bytes(block->end_page - block->start_page);
   *prot = block->prot;
-  *flags = block->flags;
+  *flags = block->mmap_flags;
   *handle = block->fd;
   *offset = block->offset;
 
-  TRACE("armeabi_get_info: addr=0x%X, mmap_addr=0x%X size=0x%X, prot=0x%X flags=0x%X, fd=0x%X, offset=%d",
+  TRACE("armeabi_get_info: addr=0x%X, mmap_addr=0x%X size=0x%X, prot=0x%X flags=0x%X, fd=%d, offset=%d",
 	addr, *mmap_addr, *size, *prot, *flags, *handle, *offset);
 
   return NULL;
@@ -674,7 +689,7 @@ armeabi_get_page_protection (eabi_PTR addr, int *prot_ret)
   _kernel_oserror *err = dynamic_pmp_page_info(allocator->base.da.number, &entry, 1);
   if (err || entry.da_page_number == -1)
     {
-      LOG("allocator_change_protection: dynamic_pmp_page_info error: %s", err->errmess);
+      LOG("armeabi_get_page_protection: dynamic_pmp_page_info error: %s", err->errmess);
       return armeabisupport_page_map_error;
     }
 

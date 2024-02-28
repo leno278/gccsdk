@@ -20,6 +20,7 @@ struct _app_object;
 #define ABORTOP_INSTALL			2
 #define ABORTOP_REMOVE			3
 #define ABORTOP_READ_STATUS		4
+#define ABORTOP_GET_FLAGS		5
 
 typedef struct abort_handler
 {

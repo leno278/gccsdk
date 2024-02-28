@@ -1,6 +1,6 @@
 /* init-fini.c
  *
- * Copyright 2019-2021 GCCSDK Developers
+ * Copyright 2019-2024 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -12,6 +12,8 @@
 #include "swi.h"
 #include "abort.h"
 #include "memory.h"
+#include "filedesc.h"
+
 #define DEBUG_PRINT 0
 #include "debug.h"
 
@@ -84,6 +86,8 @@ _kernel_oserror *module_initialise (const char *tail, int podule_base, void *pw)
   _kernel_oserror *err;
 
   memset (&global, 0, sizeof (armeabisupport_globals));
+
+  filedesc_initialise(&global);
 
   // linklist_init_list (&global.app_list);
   // global.flags.no_client_check = false;

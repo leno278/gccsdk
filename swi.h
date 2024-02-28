@@ -42,7 +42,7 @@
 
 _kernel_oserror *dynamic_area_create (const char *name,
 				      int max_size,
-				      bool needs_mapping,
+				      unsigned type,
 				      dynamicarea_block *ret);
 
 #ifndef USE_INLINE_SWIS

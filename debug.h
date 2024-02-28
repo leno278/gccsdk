@@ -19,7 +19,7 @@
 #define LOG_PRINT 1
 #define LOG_REPORT 2
 
-#define ENABLE_TRACE 1
+#define ENABLE_TRACE 0
 
 extern void log_printf(const char *format, ...);
 extern void reporter_printf(const char *format, ...);

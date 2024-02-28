@@ -9,10 +9,8 @@
 
 #include "link_list.h"
 #include <stdint.h>
-
-typedef unsigned int bool;
-#define true 1
-#define false 0
+#include <stdbool.h>
+#include <kernel.h>
 
 #define ALLOCATOR_NAME_MAX_LEN	32
 
@@ -85,7 +83,8 @@ typedef struct armeabisupport_globals
   link_list mmap_allocator_pool;
   link_list app_list;
   link_list allocator_list;
-  link_list shm_object_list;
+  link_list fd_list;
+  unsigned next_fd;
   bool pre_filter_installed;
   bool post_filter_installed;
   bool aborttrap_enabled;
@@ -144,9 +143,11 @@ typedef struct mmap_block
   uint32_t access;	/* Memory protection flags as used by the OS  */
 
   int prot;		/* Memory protection flags as used by mmap  */
-  int flags;		/* Flags as used by mmap  */
+  int mmap_flags;	/* Flags as used by mmap  */
   int fd;
   uint32_t offset;
+
+  bool is_shm;
 
   app_object *owner;
 } mmap_block;

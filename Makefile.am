@@ -1,9 +1,10 @@
-# Copyright (c) 2019-2021 GCCSDK developers
+# Copyright (c) 2019-2024 GCCSDK developers
 
 bin_PROGRAMS=ARMEABISupport
 ARMEABISupport_SOURCES=link_list.c memory.c swihandler.c init-fini.c \
 			main.c swi.c swi-asm.s command.c abort.c abort-asm.s \
-			stack.c stack-asm.s mmap.c mmap-asm.s shm.c armeabisupport.cmhg
+			stack.c stack-asm.s mmap.c mmap-asm.s shm.c filedesc.c \
+			armeabisupport.cmhg
 include_HEADERS=armeabi-support.h
 BUILT_SOURCES=armeabisupport.h
 ARMEABISupport_CFLAGS=-O3 -mmodule -Wall -std=gnu99

@@ -1,4 +1,4 @@
-@ Copyright (c) 2019-2021 GCCSDK Developers
+@ Copyright (c) 2019-2024 GCCSDK Developers
 @ Written by Lee Noar
 
 #include "decl-asm.h"
@@ -56,7 +56,6 @@ USR_mode:
 	LDR	r10, [r7, #ABORT_BLOCK_FIRST_HANDLER]
 	TEQ	r10, #0
 	BEQ	handler__pass_on
-	ADR	r11, registers_0
 	MOV	r1, r8					@ address of fault
 0:
 	LDR	r12, [r10, #ABORT_HANDLER_R12_DATA]
@@ -315,13 +314,6 @@ da_handler:
 aborttrap_handler:
 	STMFD	sp!, {r1-r3, r5-r12, lr}
 
-	REPORT_TEXT "aborttrap_handler"
-@	REPORT_DEC r1
-@	REPORT_HEX r2
-	REPORT_HEX r3
-@	REPORT_DEC r4
-@	REPORT_HEX r5
-
 	MOV	r7, r12
 
 	@ Guard against an abort in this abort handler, as soon as possible at least
@@ -400,9 +392,6 @@ aborttrap_handler__exit:
 	@   V flag clear
 	@   Return 0 in r0
 	@   Return r4 as it was on entry
-	REPORT_TEXT "data size:"
-	REPORT_DEC r4
-
 	TEQ	r9, #STORE_OP
 	BNE	aborttrap_handler__loadop
 
@@ -470,7 +459,6 @@ aborttrap_handler__storeop:
 	LDMFD	sp!, {r1-r3, r5-r12, pc}
 
 aborttrap_handler__loadop:
-REPORT_TEXT "load_op"
 	TEQ	r9, #MAP_OP
 	MOVEQ	r0, #(ABORT_ERROR_UNHANDLED << 8)
 	STREQ	r0, [r7, #ABORT_BLOCK_STATUS]
@@ -489,8 +477,8 @@ REPORT_TEXT "load_op"
 	ADD	r1, pc, r1
 	@ Following instruction is required to align start of jump table
 	@ which is why it isn't folded into the one above.
-@	MOV	pc, r1
-  B 1f
+	MOV	pc, r1
+
 	STR	r0, [r2], #4
 	STR	r0, [r2], #4
 	STR	r0, [r2], #4
@@ -506,11 +494,6 @@ REPORT_TEXT "load_op"
 	STR	r0, [r2], #4
 	STR	r0, [r2], #4
 	STR	r0, [r2], #4
-1:
-  REPORT_TEXT "Jump to:"
-  REPORT_HEX r1
-  MOV r0,#(ABORT_ERROR_UNHANDLED << 8)
-  B	aborttrap_handler__error
 0:
 	@ Return value of 0 in r0 and clear V flag
 	MOVS	r0, #ABORT_ERROR_NONE

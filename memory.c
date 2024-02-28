@@ -1,6 +1,6 @@
 /* memory.c
  *
- * Copyright 2019-2023 GCCSDK Developers
+ * Copyright 2019-2024 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -9,6 +9,7 @@
 #include "memory.h"
 #include "mmap.h"
 #include "shm.h"
+#include "filedesc.h"
 #include "swi.h"
 #include "types.h"
 
@@ -16,6 +17,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <sys/mman.h>
 
 #define DEBUG_PRINT 0
@@ -33,6 +35,7 @@
 #define LOG(format,...)
 #endif
 
+#undef TRACE
 #if TRACING
 #define TRACE(format,...) reporter_printf(format, ##__VA_ARGS__)
 #else
@@ -1120,6 +1123,8 @@ allocator_mmap (armeabisupport_allocator_mmap *allocator,
       return err;
     }
 
+  new_block->is_shm = false;
+
   current = linklist_first_mmap_block (&allocator->block_list);
   if (!current || required_page_count <= current->start_page)
     {
@@ -1201,6 +1206,12 @@ _kernel_oserror *
 allocator_munmap_block(armeabisupport_allocator_mmap *allocator,
 		       mmap_block *block)
 {
+  if (!block)
+    {
+      LOG("allocator_munmap_block: attempt to free NULL block");
+      return NULL;
+    }
+
 //reporter_printf/*      TRACE*/("allocator_munmap_block: shared memory object %p, \"%s\"", shm_obj, shm_obj->name);
   unmap_release_pages(&allocator->base, block->start_page, block->end_page - block->start_page);
   linklist_remove(&allocator->block_list, &block->link);
@@ -1230,13 +1241,17 @@ allocator_munmap (armeabisupport_allocator_mmap *allocator,
 	  if (page == current->start_page && page_count == current->end_page - current->start_page)
 	    {
 	      /* Freeing whole block. Does it match a shared memory object? */
-	      if (current->fd != -1 && (void *)current->fd > (void *)0x8000)
+	      filedesc *obj = filedesc_find_fd(current->fd);
+	      if (obj)
 		{
-		  shm_object *shm_obj = (shm_object *)current->fd;
-
-		  TRACE("allocator_munmap: shared memory object %p, \"%s\", fd=%p",
-			shm_obj, shm_obj->name, current->fd);
-		  shm_deref_object(shm_obj);
+		  TRACE_SHM("allocator_munmap: shared memory object %p, \"%s\", fd=%d, addr=%p, len=%d, ref=%d",
+			    obj->shm,
+			    obj->shm->name,
+			    obj->value,
+			    page_to_addr(&obj->shm->allocator->base, obj->shm->block->start_page),
+			    pages_to_bytes(obj->shm->block->end_page - obj->shm->block->start_page),
+			    obj->shm->ref_count);
+		  shm_deref_object(obj->shm);
 		  return NULL;
 		}
 
@@ -1310,7 +1325,7 @@ allocator_move_mmap_block(armeabisupport_allocator_mmap *allocator,
   err = armeabi_mmap(NULL,
 		     pages_to_bytes((block->end_page - block->start_page) + page_diff),
 		     block->prot,
-		     block->flags,
+		     block->mmap_flags,
 		     block->fd,
 		     block->offset,
 		     &new_allocator,	/* May be same as the old one.  */
@@ -1473,7 +1488,9 @@ allocator_mmap_cleanup_app(armeabisupport_allocator_mmap *allocator,
   while (block)
     {
       mmap_block *next = linklist_next_mmap_block (block);
-      if (block->owner == app)
+      /* Don't clean up shared memory blocks as they may still be in use elsewhere.  */
+      filedesc *fd = filedesc_find_fd(block->fd);
+      if (block->owner == app && !block->is_shm)
 	{
 	  unmap_release_pages(&allocator->base,
 			      block->start_page,
@@ -1739,7 +1756,7 @@ _kernel_oserror *allocator_change_protection(armeabisupport_allocator_mmap *allo
     p++;
   }
 
-  block->flags = flags;
+  block->mmap_flags = flags;
 
   return NULL;
 }

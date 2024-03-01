@@ -58,7 +58,6 @@ reporter_printf(format, ##__VA_ARGS__); \
 } while (0)
 #else
 #define TRACE(format, ...)
-
 #endif
 
 #endif

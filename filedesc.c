@@ -37,6 +37,7 @@
 *	    r1 = fd
 *	  Exit
 *	    r0 = error pointer (V set) if unknown fd, or 0 (V clear) if known
+*	    r1 = type of fd, 0 if invalid
 *	1 - close
 *	  Entry
 *	    r1 = fd
@@ -52,9 +53,16 @@ fd_op(_kernel_swi_regs *r)
 
   switch (reason)
   {
-  case FDOP_VALIDATE_FD: 
-    err = filedesc_find_fd(r->r[1]) ? NULL : armeabisupport_EBADF;
+  case FDOP_VALIDATE_FD: {
+    filedesc *fd = filedesc_find_fd(r->r[1]);
+    if (fd)
+      r->r[1] = fd->type;
+    else {
+      r->r[1] = fdtype_INVALID;
+      err = armeabisupport_EBADF;
+    }
     break;
+  }
   case FDOP_CLOSE_FD:
     err = filedesc_close(r->r[1]);
     break;

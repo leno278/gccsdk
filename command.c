@@ -1,6 +1,6 @@
 /* command.c
  *
- * Copyright 2018-2021 GCCSDK Developers
+ * Copyright 2018-2024 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -13,6 +13,7 @@
 #include "types.h"
 #include "memory.h"
 #include "shm.h"
+#include "filedesc.h"
 #include "debug.h"
 
 static void
@@ -44,6 +45,9 @@ command_info(void)
 
   printf("SHM:\n");
   shm_dump_object_list();
+
+  printf("FDs:\n");
+  filedesc_dump_fds();
 }
 
 _kernel_oserror *

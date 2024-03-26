@@ -30,14 +30,14 @@
 #define TRACING 0
 
 #if LOGGING
-#define LOG(format,...) reporter_printf(format, ##__VA_ARGS__)
+#define LOG(format,...) do { reporter_printf(format, ##__VA_ARGS__); } while(0)
 #else
 #define LOG(format,...)
 #endif
 
 #undef TRACE
 #if TRACING
-#define TRACE(format,...) reporter_printf(format, ##__VA_ARGS__)
+#define TRACE(format,...) do { reporter_printf(format, ##__VA_ARGS__); } while(0)
 #else
 #define TRACE(format,...)
 #endif
@@ -1212,7 +1212,6 @@ allocator_munmap_block(armeabisupport_allocator_mmap *allocator,
       return NULL;
     }
 
-//reporter_printf/*      TRACE*/("allocator_munmap_block: shared memory object %p, \"%s\"", shm_obj, shm_obj->name);
   unmap_release_pages(&allocator->base, block->start_page, block->end_page - block->start_page);
   linklist_remove(&allocator->block_list, &block->link);
   rma_free(block);
@@ -1490,14 +1489,29 @@ allocator_mmap_cleanup_app(armeabisupport_allocator_mmap *allocator,
       mmap_block *next = linklist_next_mmap_block (block);
       /* Don't clean up shared memory blocks as they may still be in use elsewhere.  */
       filedesc *fd = filedesc_find_fd(block->fd);
-      if (block->owner == app && !block->is_shm)
+
+      if (fd)
+	TRACE("allocator_mmap_cleanup_app: app=0x%X, block owner=0x%X, block=0x%X, fd=%d, shm=%p, ref=%d",
+		    app, block->owner,
+		    page_to_addr(&allocator->base,block->start_page),
+		    block->fd, fd->shm, fd->shm->ref_count);
+      else
+	TRACE("allocator_mmap_cleanup_app: app=0x%X, block owner=0x%X, block=0x%X, fd=%d",
+		    app, block->owner,
+		    page_to_addr(&allocator->base,block->start_page),
+		    block->fd);
+
+      if (block->owner == app)
 	{
+	  TRACE("allocator_mmap_cleanup_app:   removed");
 	  unmap_release_pages(&allocator->base,
 			      block->start_page,
 			      block->end_page - block->start_page);
 	  linklist_remove(&allocator->block_list, &block->link);
 	  rma_free(block);
 	}
+      else
+	TRACE("allocator_mmap_cleanup_app:   ignored");
       block = next;
     }
 }

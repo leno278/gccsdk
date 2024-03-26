@@ -39,6 +39,5 @@ extern _kernel_oserror *shm_op(_kernel_swi_regs * r);
 extern bool shm_deref_object(shm_object *);
 extern _kernel_oserror *shm_close(shm_object *shm);
 extern void shm_dump_object_list(void);
-extern void shm_cleanup_app(app_object *app, filedesc *fd);
 
 #endif

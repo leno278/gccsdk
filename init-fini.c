@@ -13,6 +13,7 @@
 #include "abort.h"
 #include "memory.h"
 #include "filedesc.h"
+#include "mmap.h"
 
 #define DEBUG_PRINT 0
 #include "debug.h"
@@ -140,7 +141,11 @@ _kernel_oserror *module_finalisation (int fatal, int podule_base, void *pw)
     return armeabisupport_in_use;
 #endif
 
+  // Remove the stack allocator.
   allocator_destroy_internal(global.stack_allocator);
+
+  // Remove all mmap allocations and allocators.
+  allocator_destroy_all(&global.mmap_allocator_pool);
 
   remove_pre_filter();
   remove_post_filter();

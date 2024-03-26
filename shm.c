@@ -136,10 +136,10 @@ shm_dump_object_list(void)
       if (fd->type == fdtype_SHM)
 	{
 	  shm_object *shm = fd->shm;
-	  printf("  %p \'%s\', linked=%d, fd=%d, ref=%d",
+	  printf("  0x%X \'%s\', linked=%d, fd=%d, ref=%d",
 		 shm, shm->name, shm->linked, fd->value, shm->ref_count);
 	  if (shm->block)
-	    printf(", addr=%p, size=0x%lX\n",
+	    printf(", addr=0x%X, size=0x%lX\n",
 		   page_to_addr(&shm->allocator->base, shm->block->start_page),
 		   pages_to_bytes(shm->block->end_page - shm->block->start_page));
 	  else
@@ -281,7 +281,8 @@ shm_open(const char *name, int oflag, int mode, filedesc **result)
   return NULL;
 
 error:
-  *result = NULL;  return err;
+  *result = NULL;
+  return err;
 }
 
 static _kernel_oserror *
@@ -350,23 +351,6 @@ bool shm_deref_object(shm_object *shm)
   return false;
 }
 
-/* Remove any shared memory objects for the given app.
- * There can be multiple file descriptors pointing to the same shared memory,
- * so we can't just delete it outright, we have to dereference it until there
- * is only one left at which point it will be deleted.
- */
-void shm_cleanup_app(app_object *app, filedesc *fd)
-{
-  TRACE_SHM("shm_cleanup_app: fd = 0x%X",fd);
-  TRACE_SHM("  fd->shm = 0x%X",fd->shm);
-  TRACE_SHM("  fd->shm->fd = %d",fd->value);
-  TRACE_SHM("  fd->shm->ref_count = %d",fd->shm->ref_count);
-  TRACE_SHM("  fd->shm->block = 0x%X",page_to_addr(&fd->shm->allocator->base,fd->shm->block->start_page));
-  if (fd && fd->shm && fd->shm->valid == VALID_SHM/* && fd->shm->block->owner == app*/)
-    shm_deref_object(fd->shm);
-}
-
-
 _kernel_oserror *
 shm_dup(int fd_to_dup, filedesc **result)
 {
@@ -393,8 +377,8 @@ shm_dup(int fd_to_dup, filedesc **result)
 	    fd_to_dup,
 	    new_fd->value,
 	    shm,
-	    page_to_addr(&fd->shm->allocator->base, fd->shm->block->start_page),
-		pages_to_bytes(shm->block->end_page - shm->block->start_page),
+	    fd->shm->block ? page_to_addr(&fd->shm->allocator->base, fd->shm->block->start_page) : 0,
+	    fd->shm->block ? pages_to_bytes(shm->block->end_page - shm->block->start_page) : 0,
 	    shm->ref_count);
 
   return NULL;

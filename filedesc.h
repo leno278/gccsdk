@@ -51,5 +51,6 @@ extern _kernel_oserror *filedesc_new_fd(filedesc **);
 extern _kernel_oserror *filedesc_close(int);
 extern filedesc *filedesc_find_fd(int fd);
 extern void filedesc_cleanup_app(app_object *app);
+extern void filedesc_dump_fds(void);
 
 #endif

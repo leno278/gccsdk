@@ -130,7 +130,7 @@ _kernel_oserror *filedesc_close(int required_fd)
   fd->type = fdtype_INVALID;
   fd->owner = NULL;
 
-  /* Don't free the filedesc memory or destory the fd value, we'll reuse it */
+  /* Don't free the filedesc memory or destroy the fd value, we'll reuse it */
 
   return err;
 }
@@ -149,7 +149,8 @@ filedesc *filedesc_find_fd(int required_fd)
   return fd;
 }
 
-/* Remove any shared memory objects for the given app.  */
+/* Remove any shared memory objects for the given app
+ * and while we're at it, garbage collect any unused fds.  */
 void filedesc_cleanup_app(app_object *app)
 {
   filedesc *fd = linklist_first_filedesc(&global.fd_list);
@@ -159,9 +160,9 @@ void filedesc_cleanup_app(app_object *app)
 
       if (fd->owner == app && fd->type == fdtype_SHM && fd->shm && fd->shm->valid == VALID_SHM)
 	{
-	  TRACE("filedesc_cleanup_app: fd = %p",fd);
+	  TRACE("filedesc_cleanup_app: filedesc = 0x%X", fd);
 	  TRACE("  fd->shm = %p",fd->shm);
-	  TRACE("  fd->shm->fd = %d",fd->value);
+	  TRACE("  fd->value = %d",fd->value);
 	  TRACE("  fd->shm->ref_count = %d",fd->shm->ref_count);
 	  TRACE("  fd->shm->block = %p",page_to_addr(&fd->shm->allocator->base,fd->shm->block->start_page));
 	  shm_deref_object(fd->shm);
@@ -169,7 +170,26 @@ void filedesc_cleanup_app(app_object *app)
 	  linklist_remove(&global.fd_list, &fd->link);
 	  rma_free(fd);
 	}
+      else if (fd->owner == NULL && fd->type == fdtype_INVALID)
+	{
+	  /* Garbage collect any unused fds.  */
+	  TRACE("filedesc_cleanup_app: removing unused filedesc = 0x%X", fd);
+	  TRACE("  fd->value = %d",fd->value);
+	  linklist_remove(&global.fd_list, &fd->link);
+	  rma_free(fd);
+	}
 
       fd = next;
+    }
+}
+
+void filedesc_dump_fds(void)
+{
+  filedesc *fd;
+  for (fd = linklist_first_filedesc(&global.fd_list);
+       fd;
+       fd = linklist_next_filedesc(fd))
+    {
+      printf("fd=%d, owner=0x%X\n", fd->value, fd->owner);
     }
 }

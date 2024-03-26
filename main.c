@@ -17,6 +17,7 @@
 #include "memory.h"
 #include "mmap.h"
 #include "shm.h"
+#include "filedesc.h"
 #include "debug.h"
 
 armeabisupport_globals global;
@@ -112,12 +113,12 @@ armeabi_cleanup(void)
 
   allocator_destroy_all(&app->allocator_list);
 
-  /* Remove all remaining mmap allocations for this app.  */
-  mmap_cleanup_app(app);
-
   /* Do this before removing the mmaps as we use the mmap allocation to identify
    * the shared memory object owner.  */
   filedesc_cleanup_app(app);
+
+  /* Remove all remaining mmap allocations for this app.  */
+  mmap_cleanup_app(app);
 
   app_remove_by_handle(app);
 

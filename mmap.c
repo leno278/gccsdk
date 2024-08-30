@@ -356,13 +356,6 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
     return armeabisupport_EINVAL;
 
   filedesc *shm_fd = filedesc_find_fd(fd);
-  if (fd != -1 && !shm_fd)
-    {
-      /* We were given a file descriptor, but it doesn't match any that we know of.  */
-      LOG("armeabi_mmap: Invalid fd (%d)", fd);
-      return armeabisupport_EBADF;
-    }
-
   shm_object *shm = NULL;
   if (shm_fd && shm_fd->type == fdtype_SHM)
     {

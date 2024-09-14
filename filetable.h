@@ -20,9 +20,9 @@ typedef struct _filetable_entry
 
 } filetable_entry;
 
-int filetable_open_file(const char *file, int flags, int mode);
+_kernel_oserror *filetable_open_file(const char *file, int flags, int mode, int *);
 
 /* Return 0 for success, -1 for error.  */
-int filetable_close_file(int filetable_idx);
+_kernel_oserror *filetable_close_file(int filetable_idx);
 
 #endif

@@ -13,6 +13,7 @@
 #include "abort.h"
 #include "memory.h"
 #include "filedesc.h"
+#include "filetable.h"
 #include "mmap.h"
 
 #define DEBUG_PRINT 0
@@ -89,6 +90,7 @@ _kernel_oserror *module_initialise (const char *tail, int podule_base, void *pw)
   memset (&global, 0, sizeof (armeabisupport_globals));
 
   filedesc_initialise(&global);
+  array_ctor(&global.file_table, sizeof(filetable_entry));
 
   // linklist_init_list (&global.app_list);
   // global.flags.no_client_check = false;
@@ -146,6 +148,8 @@ _kernel_oserror *module_finalisation (int fatal, int podule_base, void *pw)
 
   // Remove all mmap allocations and allocators.
   allocator_destroy_all(&global.mmap_allocator_pool);
+
+  array_dtor(&global.file_table);
 
   remove_pre_filter();
   remove_post_filter();

@@ -6,6 +6,7 @@
 
 #include "armeabisupport.h"
 #include "filedesc.h"
+#include "array.h"
 #include "shm.h"
 #include "memory.h"
 #include "main.h"
@@ -14,6 +15,8 @@
 
 #define FDOP_VALIDATE_FD	0
 #define FDOP_CLOSE_FD		1
+
+#define TABLE_INIT_NUM_ENTRIES 16
 
 #define TRACING 0
 #define LOGGING 0
@@ -69,6 +72,11 @@ fd_op(_kernel_swi_regs *r)
   }
 
   return err;
+}
+
+void filedesc_initialise(armeabisupport_globals *globals)
+{
+  globals->next_fd = BASE_FD;
 }
 
 _kernel_oserror *filedesc_new_fd(filedesc **result)

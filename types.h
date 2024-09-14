@@ -8,6 +8,7 @@
 #define TYPES_H
 
 #include "link_list.h"
+#include "array.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <kernel.h>
@@ -74,6 +75,7 @@ typedef struct _app_object
   link_list abort_handler_list;
   link_list stack_list;
   stack_abort_data_object stack_abort_data;
+  array_t fd_table;
 } app_object;
 LINKLIST_ACCESS_FUNCTIONS (app_object)
 
@@ -93,6 +95,8 @@ typedef struct armeabisupport_globals
   unsigned os_memory_prot_read;
   unsigned os_memory_prot_read_write;
   unsigned os_memory_prot_exec;
+
+  array_t file_table;
 } armeabisupport_globals;
 
 typedef struct _armeabisupport_allocator armeabisupport_allocator;

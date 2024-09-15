@@ -9,7 +9,11 @@
 
 #include <kernel.h>
 
-typedef struct _array_entry_base { } array_entry_base;
+typedef struct _array_entry_base
+{
+  int in_use;
+} array_entry_base;
+
 typedef struct _array_t
 {
   struct _array_entry_base *entries;

@@ -17,7 +17,6 @@
 #define FD_TYPE_SHM 1
 
 typedef struct _shm_object shm_object;
-typedef struct _filetable_entry filetable_entry;
 
 typedef enum
 {
@@ -40,11 +39,6 @@ typedef struct _filedesc
   };
 } filedesc;
 LINKLIST_ACCESS_FUNCTIONS(filedesc)
-
-typedef struct _fd_table_entry
-{
-  filetable_entry *file;
-} fd_table_entry;
 
 extern void filedesc_initialise(armeabisupport_globals *globals);
 

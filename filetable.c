@@ -34,37 +34,6 @@ static int file_object_type(const char *canon_filename)
   return object_type;
 }
 
-static char *canonicalise_filename(const char *filename)
-{
-  _kernel_oserror *err;
-  int buffer_size;
-  err = _swix(OS_FSControl,
-	      _INR(0,5) | _OUT(5),
-	      0x25,		/*  in: r0=reason code - Canonicalise path */
-	      filename,		/*  in: r1=filename */
-	      0,		/*  in: r2=ptr to buffer or 0 */
-	      0,		/*  in: r3=ptr to path variable or 0 */
-	      0,		/*  in: r4=ptr to string of paths or 0 */
-	      0,		/*  in: r5=buffer size */
-	      &buffer_size);	/* out: r5=-ve buffer size */
-  if (err)
-    return NULL;
-  char *buffer = malloc(1 - buffer_size);
-  if (!buffer)
-    return NULL;
-
-  err = _swix(OS_FSControl,
-	      _INR(0,5),	/*  in: register range r0-r5 */
-	      0x25,		/*  in: r0=reason code - Canonicalise path */
-	      filename,		/*  in: r1=filename */
-	      buffer,		/*  in: r2=ptr to buffer or 0 */
-	      0,		/*  in: r3=ptr to path variable or 0 */
-	      0,		/*  in: r4=ptr to string of paths or 0 */
-	      1 - buffer_size);	/*  in: r5=buffer size */
-
-  return err ? NULL : buffer;
-}
-
 /* See if we already have the file open and return the index if so, otherwise -1.  */
 static int filetable_scan_for_canon_filename(const char *canon_filename)
 {
@@ -123,6 +92,8 @@ static _kernel_oserror *filetable_add_entry(const char *canon_name, int flags, i
   array_t *filetable = &global.file_table;
   filetable_entry *entry = (filetable_entry *)filetable->entries;
 
+  *idx_ret = -1;
+
   int type = file_object_type(canon_name);
   if (flags & O_CREAT)
     {
@@ -153,7 +124,7 @@ static _kernel_oserror *filetable_add_entry(const char *canon_name, int flags, i
 
   int i;
   for (i = 0; i < filetable->num_entries; i++)
-    if (entry[i].filename == NULL)
+    if (entry[i].base.in_use == 0)
       break;
 
   if (i == filetable->num_entries)
@@ -165,7 +136,8 @@ static _kernel_oserror *filetable_add_entry(const char *canon_name, int flags, i
       i = filetable->num_entries / 2;
     }
 
-  entry[i].filename = canon_name; /* Take ownership of the allocated memory.  */
+  entry[i].base.in_use = 1;
+  entry[i].filename = strdup(canon_name);
   entry[i].ref_count = 1;
   entry[i].file_handle = file_handle;
 
@@ -174,10 +146,9 @@ static _kernel_oserror *filetable_add_entry(const char *canon_name, int flags, i
   return NULL;
 }
 
-_kernel_oserror *filetable_open_file(const char *file, int flags, int mode, int *idx_ret)
+_kernel_oserror *filetable_open_file(const char *canon_name, int flags, int mode, int *idx_ret)
 {
   _kernel_oserror *err = NULL;
-  char *canon_name = canonicalise_filename(file);
   int entry_idx = filetable_scan_for_canon_filename(canon_name);
   if (entry_idx != -1)
     {
@@ -185,13 +156,9 @@ _kernel_oserror *filetable_open_file(const char *file, int flags, int mode, int 
       filetable_entry *entry = (filetable_entry *)filetable->entries;
 
       entry[entry_idx].ref_count++;
-
-      /* This file is already open, so we don't need canon_name any more.  */
-      free(canon_name);
     }
   else
     {
-      /* Ownership of canon_name is passed to the table entry.  */
       err = filetable_add_entry(canon_name, flags, &entry_idx);
     }
 
@@ -211,6 +178,10 @@ _kernel_oserror *filetable_close_file(int filetable_idx)
       if (entry[filetable_idx].ref_count == 0)
 	{
 	  filetable_close_osfile(entry[filetable_idx].file_handle);
+	  free(entry[filetable_idx].filename);
+	  entry[filetable_idx].filename = NULL;
+	  entry[filetable_idx].file_handle = 0;
+	  entry[filetable_idx].base.in_use = 0;
 	  return NULL;
 	}
     }

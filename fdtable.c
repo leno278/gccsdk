@@ -95,6 +95,8 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
   *fd_ret = i + FDTABLE_BASE_FD;
   entry[i].base.in_use = 1;
   entry[i].filetable_idx = filetable_idx;
+  entry[i].flags = flags;
+  entry[i].mode = mode;
 
   return NULL;
 

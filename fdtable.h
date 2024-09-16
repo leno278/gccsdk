@@ -15,6 +15,7 @@ typedef struct _fdtable_entry
 
   int filetable_idx;
   int flags;
+  int mode;
 
 } fdtable_entry;
 

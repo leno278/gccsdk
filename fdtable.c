@@ -97,6 +97,7 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
   entry[i].filetable_idx = filetable_idx;
   entry[i].flags = flags;
   entry[i].mode = mode;
+  entry[i].file_offset = 0;
 
   return NULL;
 
@@ -114,6 +115,93 @@ _kernel_oserror *fdtable_close_file(int fd)
 
   filetable_close_file(entry->filetable_idx);
   entry->base.in_use = 0;
+
+  return NULL;
+}
+
+_kernel_oserror *fdtable_lseek(int fd, off_t offset, int whence, off_t *offset_ret)
+{
+  fdtable_entry *entry = get_fdtable_entry(fd);
+  if (!entry)
+    return armeabisupport_EBADF;
+
+  switch (whence)
+    {
+    case SEEK_SET:
+      entry->file_offset = offset;
+      break;
+    case SEEK_CUR:
+      entry->file_offset += offset;
+      break;
+    case SEEK_END: {
+      unsigned file_length;
+      _kernel_oserror *err = filetable_get_file_length(entry->filetable_idx, &file_length);
+      if (err)
+	return err;
+      entry->file_offset = file_length + offset;
+      break;
+    }
+    default:
+      return armeabisupport_EINVAL;
+    }
+
+  *offset_ret = entry->file_offset;
+
+  return NULL;
+}
+
+_kernel_oserror *fdtable_read(int fd, void *buf, size_t count, int *bytes_read)
+{
+  fdtable_entry *entry = get_fdtable_entry(fd);
+  if (!entry)
+    return armeabisupport_EBADF;
+
+  if (count == 0)
+    {
+      *bytes_read = 0;
+      return NULL;
+    }
+
+  int bytes_not_read;
+  _kernel_oserror *err;
+  err = filetable_read_bytes(entry->filetable_idx,
+			     buf,
+			     count,
+			     &entry->file_offset,
+			     &bytes_not_read);
+  if (err)
+    return err;
+
+  *bytes_read = count - bytes_not_read;
+
+  return NULL;
+}
+
+_kernel_oserror *fdtable_write(int fd, void *buf, size_t count, int *bytes_written)
+{
+  fdtable_entry *entry = get_fdtable_entry(fd);
+  if (!entry)
+    return armeabisupport_EBADF;
+
+  int bytes_not_written;
+  _kernel_oserror *err;
+  if (entry->flags & O_APPEND)
+    {
+      err = filetable_get_file_length(entry->filetable_idx,
+				      &entry->file_offset);
+      if (err)
+	return err;
+    }
+
+  err = filetable_write_bytes(entry->filetable_idx,
+			      buf,
+			      count,
+			      &entry->file_offset,
+			      &bytes_not_written);
+  if (err)
+    return err;
+
+  *bytes_written = count - bytes_not_written;
 
   return NULL;
 }

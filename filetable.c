@@ -47,7 +47,7 @@ static int filetable_scan_for_canon_filename(const char *canon_filename)
   return -1;
 }
 
-static _kernel_oserror *filetable_create_osfile(const char *canon_filename, int *handle)
+static _kernel_oserror *osfile_create(const char *canon_filename, int *handle)
 {
   _kernel_oserror *err;
   err = _swix(OS_Find,
@@ -61,7 +61,7 @@ static _kernel_oserror *filetable_create_osfile(const char *canon_filename, int 
   return err;
 }
 
-static _kernel_oserror *filetable_open_osfile(const char *canon_filename, int *handle)
+static _kernel_oserror *osfile_open(const char *canon_filename, int *handle)
 {
   _kernel_oserror *err;
   err = _swix(OS_Find,
@@ -75,14 +75,75 @@ static _kernel_oserror *filetable_open_osfile(const char *canon_filename, int *h
   return err;
 }
 
-static _kernel_oserror *filetable_close_osfile(int handle)
+static inline _kernel_oserror *osfile_close(int handle)
 {
-  _kernel_oserror *err;
-  err = _swix(OS_Find,
-	      _INR(0,1),
-	      0x0,		/* in: r0=close file */
-	      handle);		/* in: r1=file handle */
-  return err;
+  return _swix(OS_Find,
+	       _INR(0,1),
+	       0x0,		/* in: r0=close file */
+	       handle);		/* in: r1=file handle */
+}
+
+static inline _kernel_oserror *osargs_set_pointer(int file_handle, unsigned file_pointer)
+{
+  return _swix(OS_Args,
+	       _INR(0,2),
+	       0x1,		/* in: r0=reason code - write pointer */
+	       file_handle,	/* in: r1=handle */
+	       file_pointer);	/* in: r2=pointer */
+}
+
+static inline _kernel_oserror *osargs_get_pointer(int file_handle, unsigned *file_pointer)
+{
+  return _swix(OS_Args,
+	       _INR(0,1)|_OUT(2),
+	       0x0,		/*  in: r0=reason code - read pointer */
+	       file_handle,	/*  in: r1=handle */
+	       file_pointer);	/* out: r2=pointer */
+}
+
+static _kernel_oserror *osargs_get_file_extent(int file_handle, unsigned *length)
+{
+  return _swix(OS_Args,
+	       _INR(0,1)|_OUT(2),
+	       0x2,		/*  in: r0=reason code - read extent */
+	       file_handle,	/*  in: r1=handle */
+	       length);		/* out: r2=length */
+}
+
+static _kernel_oserror *osgbpb_read_bytes_at(int file_handle,
+					     void *buf,
+					     int count,
+					     off_t file_pointer,
+					     int *bytes_not_read,
+					     off_t *new_file_pointer)
+{
+  return _swix(OS_GBPB,
+	       _INR(0,4) | _OUTR(3,4),
+	       0x3,		/*   in: r0=reason code - read bytes from given offset */
+	       file_handle,	/*   in: r1=handle */
+	       buf,		/*   in: r2=buffer */
+	       count,		/*   in: r3=number of bytes to read */
+	       file_pointer,	/*   in: r4=file pointer to start reading from */
+	       bytes_not_read,	/*  out: r3=number of bytes not read */
+	       new_file_pointer);/* out: r4=new file pointer */
+}
+
+static _kernel_oserror *osgbpb_write_bytes_at(int file_handle,
+					      void *buf,
+					      int count,
+					      off_t file_pointer,
+					      int *bytes_not_written,
+					      off_t *new_file_pointer)
+{
+  return _swix(OS_GBPB,
+	       _INR(0,4) | _OUTR(3,4),
+	       0x0,		/*   in: r0=reason code - write bytes from given offset */
+	       file_handle,	/*   in: r1=handle */
+	       buf,		/*   in: r2=buffer */
+	       count,		/*   in: r3=number of bytes to write */
+	       file_pointer,	/*   in: r4=file pointer to start writing to */
+	       bytes_not_written,/* out: r3=number of bytes not written */
+	       new_file_pointer);/* out: r4=new file pointer */
 }
 
 static _kernel_oserror *filetable_add_entry(const char *canon_name, int flags, int *idx_ret)
@@ -99,7 +160,7 @@ static _kernel_oserror *filetable_add_entry(const char *canon_name, int flags, i
     {
       if (type == OBJECT_TYPE_NOT_FOUND)
 	{
-	  err = filetable_create_osfile(canon_name, &file_handle);
+	  err = osfile_create(canon_name, &file_handle);
 	}
       else
 	{
@@ -107,7 +168,7 @@ static _kernel_oserror *filetable_add_entry(const char *canon_name, int flags, i
 	    return armeabisupport_EEXIST;
 	  if (type == OBJECT_TYPE_DIR)
 	    return armeabisupport_EINVAL;
-	  err = filetable_open_osfile(canon_name, &file_handle);
+	  err = osfile_open(canon_name, &file_handle);
 	}
     }
   else
@@ -116,7 +177,7 @@ static _kernel_oserror *filetable_add_entry(const char *canon_name, int flags, i
 	return armeabisupport_ENOENT;
       if (type == OBJECT_TYPE_DIR)
 	return armeabisupport_EACCES;
-      err = filetable_open_osfile(canon_name, &file_handle);
+      err = osfile_open(canon_name, &file_handle);
     }
 
   if (err)
@@ -177,7 +238,7 @@ _kernel_oserror *filetable_close_file(int filetable_idx)
       entry[filetable_idx].ref_count--;
       if (entry[filetable_idx].ref_count == 0)
 	{
-	  filetable_close_osfile(entry[filetable_idx].file_handle);
+	  osfile_close(entry[filetable_idx].file_handle);
 	  free(entry[filetable_idx].filename);
 	  entry[filetable_idx].filename = NULL;
 	  entry[filetable_idx].file_handle = 0;
@@ -187,4 +248,46 @@ _kernel_oserror *filetable_close_file(int filetable_idx)
     }
 
   return armeabisupport_EINVAL;
+}
+
+_kernel_oserror *filetable_get_file_length(int filetable_idx, unsigned *length)
+{
+  array_t *filetable = &global.file_table;
+  filetable_entry *entry = (filetable_entry *)filetable->entries;
+
+  return osargs_get_file_extent(entry[filetable_idx].file_handle, length);
+}
+
+_kernel_oserror *filetable_read_bytes(int filetable_idx,
+				      void *buf,
+				      size_t count,
+				      off_t *file_ptr,
+				      int *bytes_not_read)
+{
+  array_t *filetable = &global.file_table;
+  filetable_entry *entry = (filetable_entry *)filetable->entries;
+
+  return osgbpb_read_bytes_at(entry[filetable_idx].file_handle,
+			      buf,
+			      count,
+			      *file_ptr,
+			      bytes_not_read,
+			      file_ptr);
+}
+
+_kernel_oserror *filetable_write_bytes(int filetable_idx,
+				       void *buf,
+				       size_t count,
+				       off_t *file_ptr,
+				       int *bytes_not_written)
+{
+  array_t *filetable = &global.file_table;
+  filetable_entry *entry = (filetable_entry *)filetable->entries;
+
+  return osgbpb_write_bytes_at(entry[filetable_idx].file_handle,
+			       buf,
+			       count,
+			       *file_ptr,
+			       bytes_not_written,
+			       file_ptr);
 }

@@ -11,6 +11,7 @@
 #include "main.h"
 #include <kernel.h>
 #include <stdlib.h>
+#include <fcntl.h>
 #include <swis.h>
 
 #define FDTABLE_BASE_FD 10000
@@ -22,6 +23,10 @@ static inline fdtable_entry *get_fdtable_entry(int fd)
     return NULL;
   array_t *fdtable = &app->fd_table;
   fdtable_entry *entry = (fdtable_entry *)fdtable->entries;
+
+  int fd_idx = fd - FDTABLE_BASE_FD;
+  if (fd_idx < 0 || fd_idx >= fdtable->num_entries)
+    return NULL;
 
   return &entry[fd - FDTABLE_BASE_FD];
 }
@@ -113,6 +118,9 @@ _kernel_oserror *fdtable_close_file(int fd)
   if (!entry)
     return armeabisupport_EBADF;
 
+  if (entry->base.in_use == 0)
+    return armeabisupport_EBADF;
+
   filetable_close_file(entry->filetable_idx);
   entry->base.in_use = 0;
 
@@ -156,6 +164,9 @@ _kernel_oserror *fdtable_read(int fd, void *buf, size_t count, int *bytes_read)
   if (!entry)
     return armeabisupport_EBADF;
 
+  if ((entry->flags & O_ACCMODE) == O_WRONLY)
+    return armeabisupport_EBADF;
+
   if (count == 0)
     {
       *bytes_read = 0;
@@ -183,12 +194,15 @@ _kernel_oserror *fdtable_write(int fd, void *buf, size_t count, int *bytes_writt
   if (!entry)
     return armeabisupport_EBADF;
 
+  if ((entry->flags & O_ACCMODE) == O_RDONLY)
+    return armeabisupport_EBADF;
+
   int bytes_not_written;
   _kernel_oserror *err;
   if (entry->flags & O_APPEND)
     {
       err = filetable_get_file_length(entry->filetable_idx,
-				      &entry->file_offset);
+				      (unsigned *)&entry->file_offset);
       if (err)
 	return err;
     }

@@ -11,6 +11,7 @@
 #include "stack.h"
 #include "mmap.h"
 #include "shm.h"
+#include "fileop.h"
 #include "filedesc.h"
 #include "main.h"
 
@@ -45,6 +46,9 @@ module_swihandler (int number, _kernel_swi_regs * r, void *pw)
       break;
     case ARMEABISupport_FdOp - ARMEABISupport_00:
       err = fd_op(r);
+      break;
+    case ARMEABISupport_FileOp - ARMEABISupport_00:
+      err = file_op(r);
       break;
     default:
       err = error_BAD_SWI;

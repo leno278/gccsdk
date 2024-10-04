@@ -19,8 +19,6 @@
 #define LOG_PRINT 1
 #define LOG_REPORT 2
 
-#define ENABLE_TRACE 0
-
 extern void log_printf(const char *format, ...);
 extern void reporter_printf(const char *format, ...);
 
@@ -49,15 +47,6 @@ extern void report_swi_error(const char *func, int line, _kernel_oserror *err);
 #define DEBUG_OUTPUT_SWI_ERROR(err) report_swi_error(__func__, __LINE__, err)
 #else
 #define DEBUG_OUTPUT_SWI_ERROR(err)
-#endif
-
-#if ENABLE_TRACE
-#define TRACE(format, ...) \
-do {\
-reporter_printf(format, ##__VA_ARGS__); \
-} while (0)
-#else
-#define TRACE(format, ...)
 #endif
 
 #endif

@@ -9,10 +9,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define ARRAY_INIT_NUM_ENTRIES 16
+#define ENABLE_TRACING 1
+#include "trace.h"
+
+#define ENABLE_LOGGING 1
+#include "log.h"
 
 _kernel_oserror *array_ctor(array_t *this, const int entry_size)
 {
+  TRACE("%s: entry_size=%d", __func__, entry_size);
   if (!this || !entry_size)
     return armeabisupport_EINVAL;
 
@@ -25,6 +30,7 @@ _kernel_oserror *array_ctor(array_t *this, const int entry_size)
 
 _kernel_oserror *array_alloc(array_t *table)
 {
+  TRACE("%s: table=%p", __func__, table);
   int new_size;
   array_entry_base *new_table;
 
@@ -38,7 +44,10 @@ _kernel_oserror *array_alloc(array_t *table)
     {
       new_size = ARRAY_INIT_NUM_ENTRIES;
       new_table = malloc(new_size * table->entry_size);
-      if (!table->entries)
+      LOG("%d:%s: creating array of %d elements (%d bytes)",
+	  __LINE__, __func__, new_size, new_size * table->entry_size);
+      LOG("%d:%s: array ptr = %p", __LINE__, __func__, new_table);
+      if (!new_table)
 	return armeabisupport_ENOMEM;
       memset_clear_start = new_table;
       memset_clear_length = new_size * table->entry_size;
@@ -46,7 +55,10 @@ _kernel_oserror *array_alloc(array_t *table)
   else
     {
       new_size = table->num_entries * 2;
+      LOG("%d:%s: resizing array from %d to %d elements (%d bytes)", __LINE__, __func__,
+	  table->num_entries, new_size, new_size * table->entry_size);
       new_table = realloc(table->entries, new_size * table->entry_size);
+      LOG("%d:%s: new array ptr = %p", __LINE__, __func__, new_table);
       if (!new_table)
 	return armeabisupport_ENOMEM;
       memset_clear_start = new_table + table->num_entries * table->entry_size;
@@ -63,6 +75,8 @@ _kernel_oserror *array_alloc(array_t *table)
 
 void array_free(array_t *table)
 {
+  TRACE("%s: table=%p", __func__, table);
+
   if (table && table->entries)
     {
       free(table->entries);

@@ -9,6 +9,8 @@
 
 #include <kernel.h>
 
+#define ARRAY_INIT_NUM_ENTRIES 16
+
 typedef struct _array_entry_base
 {
   int in_use;

@@ -16,8 +16,8 @@
 #include "filetable.h"
 #include "mmap.h"
 
-#define DEBUG_PRINT 0
-#include "debug.h"
+#define ENABLE_TRACING 1
+#include "trace.h"
 
 static const char filter_name[] = "ARMEABISupport";
 
@@ -90,7 +90,8 @@ _kernel_oserror *module_initialise (const char *tail, int podule_base, void *pw)
   memset (&global, 0, sizeof (armeabisupport_globals));
 
   filedesc_initialise(&global);
-  array_ctor(&global.file_table, sizeof(filetable_entry));
+  array_ctor(&global.system_filetable, sizeof(systemfiletable_entry));
+  array_ctor(&global.open_filetable, sizeof(openfiletable_entry));
 
   // linklist_init_list (&global.app_list);
   // global.flags.no_client_check = false;
@@ -149,7 +150,8 @@ _kernel_oserror *module_finalisation (int fatal, int podule_base, void *pw)
   // Remove all mmap allocations and allocators.
   allocator_destroy_all(&global.mmap_allocator_pool);
 
-  array_dtor(&global.file_table);
+  array_dtor(&global.open_filetable);
+  array_dtor(&global.system_filetable);
 
   remove_pre_filter();
   remove_post_filter();

@@ -96,7 +96,8 @@ typedef struct armeabisupport_globals
   unsigned os_memory_prot_read_write;
   unsigned os_memory_prot_exec;
 
-  array_t file_table;
+  array_t open_filetable;
+  array_t system_filetable;
 } armeabisupport_globals;
 
 typedef struct _armeabisupport_allocator armeabisupport_allocator;
@@ -189,6 +190,13 @@ typedef struct _armeabisupport_allocator_mmap
   armeabisupport_allocator base;
   link_list block_list;
 } armeabisupport_allocator_mmap;
+
+typedef enum
+{
+  fdtype_INVALID,
+  fdtype_SHM,
+  fdtype_SHARED_FILE
+} fdtype;
 
 extern armeabisupport_globals global;
 

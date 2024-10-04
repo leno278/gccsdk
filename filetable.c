@@ -12,6 +12,12 @@
 #include <fcntl.h>
 #include <swi.h>
 
+#define ENABLE_TRACING 1
+#include "trace.h"
+
+#define ENABLE_LOGGING 1
+#include "log.h"
+
 #define OBJECT_TYPE_ERROR -1
 #define OBJECT_TYPE_NOT_FOUND 0
 #define OBJECT_TYPE_FILE 1
@@ -37,8 +43,8 @@ static int file_object_type(const char *canon_filename)
 /* See if we already have the file open and return the index if so, otherwise -1.  */
 static int filetable_scan_for_canon_filename(const char *canon_filename)
 {
-  array_t *filetable = &global.file_table;
-  filetable_entry *entry = (filetable_entry *)filetable->entries;
+  array_t *filetable = &global.system_filetable;
+  systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
   int i;
   for (i = 0; i < filetable->num_entries; i++)
     if (strcmp(entry[i].filename, canon_filename) == 0)
@@ -146,12 +152,13 @@ static _kernel_oserror *osgbpb_write_bytes_at(int file_handle,
 	       new_file_pointer);/* out: r4=new file pointer */
 }
 
-static _kernel_oserror *filetable_add_entry(const char *canon_name, int flags, int *idx_ret)
+static _kernel_oserror *systemfiletable_add_entry(const char *canon_name, int flags, int *idx_ret)
 {
+  TRACE("%s: name=%s", __func__, canon_name);
+
   _kernel_oserror *err = NULL;
-  int file_handle;
-  array_t *filetable = &global.file_table;
-  filetable_entry *entry = (filetable_entry *)filetable->entries;
+  int file_handle = 0;
+  array_t *filetable = &global.system_filetable;
 
   *idx_ret = -1;
 
@@ -185,17 +192,25 @@ static _kernel_oserror *filetable_add_entry(const char *canon_name, int flags, i
 
   int i;
   for (i = 0; i < filetable->num_entries; i++)
-    if (entry[i].base.in_use == 0)
-      break;
+    if (filetable->entries[i].in_use == 0)
+      {
+	LOG("%s:   Found free entry at index %d", __func__, i);
+	break;
+      }
 
   if (i == filetable->num_entries)
     {
+      LOG("%s:   No free entries (i=%d), extending array", __func__, i);
       /* No free entries, increase array.  */
       _kernel_oserror *err = array_alloc(filetable);
       if (err)
-	return err;
-      i = filetable->num_entries / 2;
+	goto error_return;
+      i = (filetable->num_entries == ARRAY_INIT_NUM_ENTRIES) ? 0 : filetable->num_entries / 2;
     }
+
+  LOG("%s:   Inserting entry at index %d", __func__, i);
+
+  systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
   entry[i].base.in_use = 1;
   entry[i].filename = strdup(canon_name);
@@ -205,43 +220,69 @@ static _kernel_oserror *filetable_add_entry(const char *canon_name, int flags, i
   *idx_ret = i;
 
   return NULL;
-}
 
-_kernel_oserror *filetable_open_file(const char *canon_name, int flags, int mode, int *idx_ret)
-{
-  _kernel_oserror *err = NULL;
-  int entry_idx = filetable_scan_for_canon_filename(canon_name);
-  if (entry_idx != -1)
-    {
-      array_t *filetable = &global.file_table;
-      filetable_entry *entry = (filetable_entry *)filetable->entries;
+error_return:
+  LOG("%s:   Error=%s", __func__, err->errmess);
 
-      entry[entry_idx].ref_count++;
-    }
-  else
-    {
-      err = filetable_add_entry(canon_name, flags, &entry_idx);
-    }
-
-  *idx_ret = entry_idx;
+  if (file_handle)
+    osfile_close(file_handle);
 
   return err;
 }
 
-_kernel_oserror *filetable_close_file(int filetable_idx)
+_kernel_oserror *systemfiletable_open_file(const char *canon_name, int flags, int mode, int *idx_ret)
 {
-  array_t *filetable = &global.file_table;
-  filetable_entry *entry = (filetable_entry *)filetable->entries;
+  TRACE("%s: name=%s", __func__, canon_name);
 
-  if (entry[filetable_idx].filename && entry[filetable_idx].file_handle > 0)
+  _kernel_oserror *err = NULL;
+  int entry_idx = filetable_scan_for_canon_filename(canon_name);
+  if (entry_idx != -1)
+    {
+      array_t *filetable = &global.system_filetable;
+      systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
+
+      entry[entry_idx].ref_count++;
+      LOG("%s: Found existing entry for file %s", __func__, canon_name);
+      LOG("%s:   at index %d, ref count now %d", __func__, entry_idx, entry[entry_idx].ref_count);
+    }
+  else
+    {
+      LOG("%s: No entry found for file %s", __func__, canon_name);
+      err = systemfiletable_add_entry(canon_name, flags, &entry_idx);
+    }
+
+  *idx_ret = entry_idx;
+  LOG("%s: Return index %d for file %s", __func__, entry_idx, canon_name);
+
+  return err;
+}
+
+_kernel_oserror *systemfiletable_close_file(int filetable_idx)
+{
+  TRACE("%s: filetable_idx=%d", __func__, filetable_idx);
+
+  array_t *filetable = &global.system_filetable;
+  systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
+
+  if (entry[filetable_idx].base.in_use)
     {
       entry[filetable_idx].ref_count--;
+      LOG("%s:   Ref count now %d for file %s", __func__,
+	  entry[filetable_idx].ref_count,
+	  entry[filetable_idx].filename);
       if (entry[filetable_idx].ref_count == 0)
 	{
-	  osfile_close(entry[filetable_idx].file_handle);
-	  free(entry[filetable_idx].filename);
-	  entry[filetable_idx].filename = NULL;
-	  entry[filetable_idx].file_handle = 0;
+	  LOG("%s:   Closing file %s", __func__, entry[filetable_idx].filename);
+	  if (entry[filetable_idx].file_handle > 0)
+	    {
+	      osfile_close(entry[filetable_idx].file_handle);
+	      entry[filetable_idx].file_handle = 0;
+	    }
+	  if (entry[filetable_idx].filename)
+	    {
+	      free((void *)entry[filetable_idx].filename);
+	      entry[filetable_idx].filename = NULL;
+	    }
 	  entry[filetable_idx].base.in_use = 0;
 	  return NULL;
 	}
@@ -250,22 +291,26 @@ _kernel_oserror *filetable_close_file(int filetable_idx)
   return armeabisupport_EINVAL;
 }
 
-_kernel_oserror *filetable_get_file_length(int filetable_idx, unsigned *length)
+_kernel_oserror *systemfiletable_get_file_length(int filetable_idx, unsigned *length)
 {
-  array_t *filetable = &global.file_table;
-  filetable_entry *entry = (filetable_entry *)filetable->entries;
+  TRACE("%s: filetable_idx=%d", __func__, filetable_idx);
+
+  array_t *filetable = &global.system_filetable;
+  systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
   return osargs_get_file_extent(entry[filetable_idx].file_handle, length);
 }
 
-_kernel_oserror *filetable_read_bytes(int filetable_idx,
-				      void *buf,
-				      size_t count,
-				      off_t *file_ptr,
-				      int *bytes_not_read)
+_kernel_oserror *systemfiletable_read_bytes(int filetable_idx,
+					    void *buf,
+					    size_t count,
+					    off_t *file_ptr,
+					    int *bytes_not_read)
 {
-  array_t *filetable = &global.file_table;
-  filetable_entry *entry = (filetable_entry *)filetable->entries;
+  TRACE("%s: filetable_idx=%d, buf=%p, count=%d", __func__, filetable_idx, buf, count);
+
+  array_t *filetable = &global.system_filetable;
+  systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
   return osgbpb_read_bytes_at(entry[filetable_idx].file_handle,
 			      buf,
@@ -275,14 +320,16 @@ _kernel_oserror *filetable_read_bytes(int filetable_idx,
 			      file_ptr);
 }
 
-_kernel_oserror *filetable_write_bytes(int filetable_idx,
-				       void *buf,
-				       size_t count,
-				       off_t *file_ptr,
-				       int *bytes_not_written)
+_kernel_oserror *systemfiletable_write_bytes(int filetable_idx,
+					     void *buf,
+					     size_t count,
+					     off_t *file_ptr,
+					     int *bytes_not_written)
 {
-  array_t *filetable = &global.file_table;
-  filetable_entry *entry = (filetable_entry *)filetable->entries;
+  TRACE("%s: filetable_idx=%d, buf=%p, count=%d", __func__, filetable_idx, buf, count);
+
+  array_t *filetable = &global.system_filetable;
+  systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
   return osgbpb_write_bytes_at(entry[filetable_idx].file_handle,
 			       buf,
@@ -290,4 +337,95 @@ _kernel_oserror *filetable_write_bytes(int filetable_idx,
 			       *file_ptr,
 			       bytes_not_written,
 			       file_ptr);
+}
+
+void systemfiletable_print(void)
+{
+  array_t *filetable = &global.system_filetable;
+  systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
+
+  LOG("System file table:");
+  LOG("%-4s %-12s %-12s %s", "Idx", "Ref", "File handle", "File");
+  for (int i = 0; i < filetable->num_entries; i++)
+    {
+      if (entry[i].base.in_use)
+	{
+	  LOG("%-4d %-12d %-12d %s", i, entry[i].ref_count, entry[i].file_handle, entry[i].filename);
+	}
+    }
+}
+
+_kernel_oserror *openfiletable_add_entry(int systemtable_idx, int flags, int mode, int *idx_ret)
+{
+  TRACE("%s: systemtable_idx=%d", __func__, systemtable_idx);
+
+  array_t *filetable = &global.open_filetable;
+
+  int i;
+  for (i = 0; i < filetable->num_entries; i++)
+    if (filetable->entries[i].in_use == 0)
+      {
+	LOG("%s:   Found free entry at index %d", __func__, i);
+	break;
+      }
+
+  if (i == filetable->num_entries)
+    {
+      LOG("%s:   No free entries (i=%d), extending array", __func__, i);
+      /* No free entries, increase array.  */
+      _kernel_oserror *err = array_alloc(filetable);
+      if (err)
+	return err;
+      i = (filetable->num_entries == ARRAY_INIT_NUM_ENTRIES) ? 0 : filetable->num_entries / 2;
+    }
+
+  LOG("%s:   Inserting entry at index %d", __func__, i);
+  LOG("%s:     systemtable index=%d", __func__, systemtable_idx);
+
+  openfiletable_entry *entry = (openfiletable_entry *)filetable->entries;
+
+  entry[i].base.in_use = 1;
+  entry[i].systemtable_idx = systemtable_idx;
+  entry[i].flags = flags;
+  entry[i].mode = mode;
+  entry[i].file_offset = 0;
+  entry[i].ref_count = 1;
+
+  *idx_ret = i;
+
+  return NULL;
+}
+
+_kernel_oserror *openfiletable_deref_entry(int openfiletable_idx)
+{
+  TRACE("%s: openfiletable_idx=%d", __func__, openfiletable_idx);
+
+  openfiletable_entry *openfile_entry = openfiletable_get_entry(openfiletable_idx);
+  openfile_entry->ref_count--;
+  LOG("%s:   new ref_count = %d, close file", __func__, openfile_entry->ref_count);
+  if (openfile_entry->ref_count == 0)
+    {
+      systemfiletable_close_file(openfile_entry->systemtable_idx);
+      openfile_entry->base.in_use = 0;
+    }
+  systemfiletable_print();
+  openfiletable_print();
+
+  return NULL;
+}
+
+void openfiletable_print(void)
+{
+  array_t *filetable = &global.open_filetable;
+  openfiletable_entry *entry = (openfiletable_entry *)filetable->entries;
+
+  LOG("Open file table:");
+  LOG("%-4s %-12s %-12s %-12s", "Idx", "SysIdx", "Ref", "File offset");
+  for (int i = 0; i < filetable->num_entries; i++)
+    {
+      if (entry[i].base.in_use)
+	{
+	  LOG("%-4d %-12d %-12d %d", i, entry[i].systemtable_idx, entry[i].ref_count, entry[i].file_offset);
+	}
+    }
 }

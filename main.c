@@ -18,6 +18,7 @@
 #include "mmap.h"
 #include "shm.h"
 #include "filedesc.h"
+#include "fdtable.h"
 #include "array.h"
 #include "debug.h"
 
@@ -49,7 +50,7 @@ app_new(app_object **app_ret)
 
   linklist_add_to_end(&global.app_list, &app->link);
 
-  array_ctor(&app->fd_table, sizeof(fd_table_entry));
+  array_ctor(&app->fd_table, sizeof(fdtable_entry));
 
   *app_ret = app;
 
@@ -90,6 +91,7 @@ app_remove_by_handle(app_object *app)
     {
       abort_deregister(get_mmap_abort_handler(), (unsigned)&global.mmap_allocator_pool);
       abort_deregister(get_stack_abort_handler(), (unsigned)&app->stack_abort_data);
+      fdtable_destroy(&app->fd_table);
       array_dtor(&app->fd_table);
       linklist_remove(&global.app_list, &app->link);
       rma_free(app);

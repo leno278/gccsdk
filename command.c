@@ -14,6 +14,7 @@
 #include "memory.h"
 #include "shm.h"
 #include "filedesc.h"
+#include "filetable.h"
 #include "debug.h"
 
 static void
@@ -48,6 +49,9 @@ command_info(void)
 
   printf("FDs:\n");
   filedesc_dump_fds();
+
+  systemfiletable_print();
+  openfiletable_print();
 }
 
 _kernel_oserror *

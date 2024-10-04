@@ -18,12 +18,6 @@
 
 typedef struct _shm_object shm_object;
 
-typedef enum
-{
-  fdtype_INVALID,
-  fdtype_SHM
-} fdtype;
-
 typedef struct _filedesc
 {
   link_hdr link;

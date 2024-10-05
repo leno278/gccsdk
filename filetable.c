@@ -107,7 +107,7 @@ static inline _kernel_oserror *osargs_get_pointer(int file_handle, unsigned *fil
 	       file_pointer);	/* out: r2=pointer */
 }
 
-static _kernel_oserror *osargs_get_file_extent(int file_handle, unsigned *length)
+static _kernel_oserror *osargs_get_file_extent(int file_handle, off_t *length)
 {
   return _swix(OS_Args,
 	       _INR(0,1)|_OUT(2),
@@ -291,7 +291,7 @@ _kernel_oserror *systemfiletable_close_file(int filetable_idx)
   return armeabisupport_EINVAL;
 }
 
-_kernel_oserror *systemfiletable_get_file_length(int filetable_idx, unsigned *length)
+_kernel_oserror *systemfiletable_get_file_length(int filetable_idx, off_t *length)
 {
   TRACE("%s: filetable_idx=%d", __func__, filetable_idx);
 

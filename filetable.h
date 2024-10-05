@@ -33,6 +33,7 @@ static inline openfiletable_entry *openfiletable_get_entry(int idx)
 
 _kernel_oserror *openfiletable_add_entry(int systemtable_idx, int flags, int mode, int *idx_ret);
 _kernel_oserror *openfiletable_deref_entry(int openfiletable_idx);
+void openfiletable_print(void);
 
 typedef struct _systemfiletable_entry
 {
@@ -46,12 +47,8 @@ typedef struct _systemfiletable_entry
 } systemfiletable_entry;
 
 _kernel_oserror *systemfiletable_open_file(const char *file, int flags, int mode, int *);
-void openfiletable_print(void);
-
-/* Return 0 for success, -1 for error.  */
 _kernel_oserror *systemfiletable_close_file(int filetable_idx);
-
-_kernel_oserror *systemfiletable_get_file_length(int filetable_idx, unsigned *length);
+_kernel_oserror *systemfiletable_get_file_length(int filetable_idx, off_t *length);
 _kernel_oserror *systemfiletable_read_bytes(int fd, void *buf, size_t count, off_t *, int *bytes_not_read);
 _kernel_oserror *systemfiletable_write_bytes(int fd, void *buf, size_t count, off_t *, int *bytes_not_written);
 void systemfiletable_print(void);

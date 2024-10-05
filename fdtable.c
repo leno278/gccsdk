@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <swis.h>
+#include <limits.h>
 
 #define ENABLE_TRACING 1
 #include "trace.h"
@@ -173,39 +174,61 @@ _kernel_oserror *fdtable_lseek(int fd, off_t offset, int whence, off_t *offset_r
   fdtable_entry *fd_entry = get_fdtable_entry(fd);
   if (!fd_entry)
     {
-      err = armeabisupport_EBADF;
-      goto error_return;
+      *offset_ret = (off_t)-1;
+      return armeabisupport_EBADF;
     }
 
   openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
+  off_t new_offset = (off_t)-1;
 
   switch (whence)
     {
     case SEEK_SET:
-      openfile_entry->file_offset = offset;
+      new_offset = offset;
+      LOG("%s: SEEK_SET: new file offset = %d", __func__, openfile_entry->file_offset);
       break;
     case SEEK_CUR:
-      openfile_entry->file_offset += offset;
+      if ((LONG_MAX - openfile_entry->file_offset) < offset)
+	err = armeabisupport_EOVERFLOW;
+      else {
+	new_offset = openfile_entry->file_offset + offset;
+	LOG("%s: SEEK_CUR: new file offset = %d", __func__, openfile_entry->file_offset);
+      }
       break;
     case SEEK_END: {
-      unsigned file_length;
+      off_t file_length;
       err = systemfiletable_get_file_length(openfile_entry->systemtable_idx, &file_length);
-      if (err)
-	goto error_return;
-      openfile_entry->file_offset = file_length + offset;
+      if (!err)
+	{
+	  LOG("%s: file_length=%d", __func__, file_length);
+	  if (LONG_MAX - file_length < offset)
+	    {
+	      err = armeabisupport_EOVERFLOW;
+	      LOG("%s: SEEK_END: EOVERFLOW: LONG_MAX=%d, file_length=%d, (LONG_MAX - file_length)=%d",
+		  __func__, LONG_MAX, file_length, LONG_MAX - file_length);
+	    }
+	  else
+	    {
+	      new_offset = file_length + offset;
+	      LOG("%s: SEEK_END: new file offset = %d", __func__, openfile_entry->file_offset);
+	    }
+	}
       break;
     }
     default:
       err = armeabisupport_EINVAL;
-      goto error_return;
+      break;
     }
 
-  *offset_ret = openfile_entry->file_offset;
+  *offset_ret = openfile_entry->file_offset = new_offset;
 
-  return NULL;
+  LOG("%s: new_offset = %d", __func__, new_offset);
 
-error_return:
-  LOG("%s:   Error=%s", __func__, err->errmess);
+  if (new_offset < 0)
+    err = armeabisupport_EINVAL;
+
+  if (err)
+    LOG("%s: Error: %s", __func__, err->errmess);
 
   return err;
 }
@@ -242,6 +265,9 @@ _kernel_oserror *fdtable_read(int fd, void *buf, size_t count, int *bytes_read)
 				   count,
 				   &openfile_entry->file_offset,
 				   &bytes_not_read);
+  LOG("%s: file offset after osgbpb=%d", __func__, openfile_entry->file_offset);
+  LOG("%s: bytes_not_read=%d", __func__, bytes_not_read);
+
   if (err)
     goto error_return;
 
@@ -264,10 +290,7 @@ _kernel_oserror *fdtable_write(int fd, void *buf, size_t count, int *bytes_writt
   _kernel_oserror *err;
   fdtable_entry *fd_entry = get_fdtable_entry(fd);
   if (!fd_entry)
-    {
-      err = armeabisupport_EBADF;
-      goto error_return;
-    }
+    return armeabisupport_EBADF;
 
   openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
 
@@ -281,7 +304,7 @@ _kernel_oserror *fdtable_write(int fd, void *buf, size_t count, int *bytes_writt
   if (openfile_entry->flags & O_APPEND)
     {
       err = systemfiletable_get_file_length(openfile_entry->systemtable_idx,
-				      (unsigned *)&openfile_entry->file_offset);
+					    &openfile_entry->file_offset);
       if (err)
 	goto error_return;
     }

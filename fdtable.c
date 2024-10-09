@@ -150,11 +150,11 @@ error_return:
 
 _kernel_oserror *fdtable_close_file(int fd)
 {
-  TRACE("%s: fd=%d", __func__, fd);
-
   fdtable_entry *fd_entry = get_fdtable_entry(fd);
   if (!fd_entry || fd_entry->base.in_use == 0)
     return armeabisupport_EBADF;
+
+  TRACE("%s: fd=%d", __func__, fd);
 
   openfiletable_deref_entry(fd_entry->opentable_idx);
 
@@ -165,8 +165,6 @@ _kernel_oserror *fdtable_close_file(int fd)
 
 _kernel_oserror *fdtable_lseek(int fd, off_t offset, int whence, off_t *offset_ret)
 {
-  TRACE("%s: fd=%d, offset=%ld, whence=%d", __func__, fd, offset, whence);
-
   _kernel_oserror *err = NULL;
   fdtable_entry *fd_entry = get_fdtable_entry(fd);
   if (!fd_entry)
@@ -174,6 +172,8 @@ _kernel_oserror *fdtable_lseek(int fd, off_t offset, int whence, off_t *offset_r
       *offset_ret = (off_t)-1;
       return armeabisupport_EBADF;
     }
+
+  TRACE("%s: fd=%d, offset=%ld, whence=%d", __func__, fd, offset, whence);
 
   openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
   off_t new_offset = (off_t)-1;
@@ -197,7 +197,7 @@ _kernel_oserror *fdtable_lseek(int fd, off_t offset, int whence, off_t *offset_r
       err = systemfiletable_get_file_length(openfile_entry->systemtable_idx, &file_length);
       if (!err)
 	{
-	  LOG("%s: file_length=%d", __func__, file_length);
+	  LOG("%s: file_length=%ld", __func__, file_length);
 	  if (LONG_MAX - file_length < offset)
 	    {
 	      err = armeabisupport_EOVERFLOW;
@@ -232,14 +232,14 @@ _kernel_oserror *fdtable_lseek(int fd, off_t offset, int whence, off_t *offset_r
 
 _kernel_oserror *fdtable_read(int fd, void *buf, size_t count, int *bytes_read)
 {
-  TRACE("%s: fd=%d, buf=0x%X, count=%d", __func__, fd, buf, count);
-
   *bytes_read = 0;
 
   _kernel_oserror *err;
   fdtable_entry *fd_entry = get_fdtable_entry(fd);
   if (!fd_entry)
     return armeabisupport_EBADF;
+
+  TRACE("%s: fd=%d, buf=0x%X, count=%d", __func__, fd, buf, count);
 
   openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
 
@@ -268,14 +268,14 @@ _kernel_oserror *fdtable_read(int fd, void *buf, size_t count, int *bytes_read)
 
 _kernel_oserror *fdtable_write(int fd, void *buf, size_t count, int *bytes_written)
 {
-  TRACE("%s: fd=%d, buf=0x%X, count=%d", __func__, fd, buf, count);
-
   *bytes_written = 0;
 
   _kernel_oserror *err;
   fdtable_entry *fd_entry = get_fdtable_entry(fd);
   if (!fd_entry)
     return armeabisupport_EBADF;
+
+  TRACE("%s: fd=%d, buf=0x%X, count=%d", __func__, fd, buf, count);
 
   openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
 

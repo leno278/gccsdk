@@ -434,7 +434,7 @@ void openfiletable_print(void)
     {
       if (entry[i].base.in_use)
 	{
-	  LOG("%-4d %-12d %-12d %d", i, entry[i].systemtable_idx, entry[i].ref_count, entry[i].file_offset);
+	  LOG("%-4d %-12d %-12d %ld", i, entry[i].systemtable_idx, entry[i].ref_count, entry[i].file_offset);
 	}
     }
 }

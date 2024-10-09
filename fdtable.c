@@ -154,10 +154,7 @@ _kernel_oserror *fdtable_close_file(int fd)
 
   fdtable_entry *fd_entry = get_fdtable_entry(fd);
   if (!fd_entry || fd_entry->base.in_use == 0)
-    {
-      LOG("%s:   Error=armeabisupport_EBADF", __func__);
-      return armeabisupport_EBADF;
-    }
+    return armeabisupport_EBADF;
 
   openfiletable_deref_entry(fd_entry->opentable_idx);
 
@@ -168,7 +165,7 @@ _kernel_oserror *fdtable_close_file(int fd)
 
 _kernel_oserror *fdtable_lseek(int fd, off_t offset, int whence, off_t *offset_ret)
 {
-  TRACE("%s: fd=%d, offset=%d, whence=%d", __func__, fd, offset, whence);
+  TRACE("%s: fd=%d, offset=%ld, whence=%d", __func__, fd, offset, whence);
 
   _kernel_oserror *err = NULL;
   fdtable_entry *fd_entry = get_fdtable_entry(fd);
@@ -185,14 +182,14 @@ _kernel_oserror *fdtable_lseek(int fd, off_t offset, int whence, off_t *offset_r
     {
     case SEEK_SET:
       new_offset = offset;
-      LOG("%s: SEEK_SET: new file offset = %d", __func__, openfile_entry->file_offset);
+      LOG("%s: SEEK_SET: new file offset = %ld", __func__, openfile_entry->file_offset);
       break;
     case SEEK_CUR:
       if ((LONG_MAX - openfile_entry->file_offset) < offset)
 	err = armeabisupport_EOVERFLOW;
       else {
 	new_offset = openfile_entry->file_offset + offset;
-	LOG("%s: SEEK_CUR: new file offset = %d", __func__, openfile_entry->file_offset);
+	LOG("%s: SEEK_CUR: new file offset = %ld", __func__, openfile_entry->file_offset);
       }
       break;
     case SEEK_END: {
@@ -204,13 +201,13 @@ _kernel_oserror *fdtable_lseek(int fd, off_t offset, int whence, off_t *offset_r
 	  if (LONG_MAX - file_length < offset)
 	    {
 	      err = armeabisupport_EOVERFLOW;
-	      LOG("%s: SEEK_END: EOVERFLOW: LONG_MAX=%d, file_length=%d, (LONG_MAX - file_length)=%d",
+	      LOG("%s: SEEK_END: EOVERFLOW: LONG_MAX=%ld, file_length=%ld, (LONG_MAX - file_length)=%ld",
 		  __func__, LONG_MAX, file_length, LONG_MAX - file_length);
 	    }
 	  else
 	    {
 	      new_offset = file_length + offset;
-	      LOG("%s: SEEK_END: new file offset = %d", __func__, openfile_entry->file_offset);
+	      LOG("%s: SEEK_END: new file offset = %ld", __func__, openfile_entry->file_offset);
 	    }
 	}
       break;
@@ -222,7 +219,7 @@ _kernel_oserror *fdtable_lseek(int fd, off_t offset, int whence, off_t *offset_r
 
   *offset_ret = openfile_entry->file_offset = new_offset;
 
-  LOG("%s: new_offset = %d", __func__, new_offset);
+  LOG("%s: new_offset = %ld", __func__, new_offset);
 
   if (new_offset < 0)
     err = armeabisupport_EINVAL;
@@ -237,21 +234,17 @@ _kernel_oserror *fdtable_read(int fd, void *buf, size_t count, int *bytes_read)
 {
   TRACE("%s: fd=%d, buf=0x%X, count=%d", __func__, fd, buf, count);
 
+  *bytes_read = 0;
+
   _kernel_oserror *err;
   fdtable_entry *fd_entry = get_fdtable_entry(fd);
   if (!fd_entry)
-    {
-      err = armeabisupport_EBADF;
-      goto error_return;
-    }
+    return armeabisupport_EBADF;
 
   openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
 
   if ((openfile_entry->flags & O_ACCMODE) == O_WRONLY)
-    {
-      err = armeabisupport_EBADF;
-      goto error_return;
-    }
+      return armeabisupport_EBADF;
 
   if (count == 0)
     {
@@ -265,20 +258,10 @@ _kernel_oserror *fdtable_read(int fd, void *buf, size_t count, int *bytes_read)
 				   count,
 				   &openfile_entry->file_offset,
 				   &bytes_not_read);
-  LOG("%s: file offset after osgbpb=%d", __func__, openfile_entry->file_offset);
-  LOG("%s: bytes_not_read=%d", __func__, bytes_not_read);
-
-  if (err)
-    goto error_return;
-
-  *bytes_read = count - bytes_not_read;
-
-  return NULL;
-
-error_return:
-  LOG("%s: Error=%s",__func__, err->errmess);
-
-  *bytes_read = 0;
+  if (!err)
+    *bytes_read = count - bytes_not_read;
+  else
+    LOG("%s: Error=%s",__func__, err->errmess);
 
   return err;
 }
@@ -286,6 +269,8 @@ error_return:
 _kernel_oserror *fdtable_write(int fd, void *buf, size_t count, int *bytes_written)
 {
   TRACE("%s: fd=%d, buf=0x%X, count=%d", __func__, fd, buf, count);
+
+  *bytes_written = 0;
 
   _kernel_oserror *err;
   fdtable_entry *fd_entry = get_fdtable_entry(fd);
@@ -296,8 +281,8 @@ _kernel_oserror *fdtable_write(int fd, void *buf, size_t count, int *bytes_writt
 
   if ((openfile_entry->flags & O_ACCMODE) == O_RDONLY)
     {
-      err = armeabisupport_EBADF;
-      goto error_return;
+      LOG("%s: Error: read only", __func__);
+      return armeabisupport_EBADF;
     }
 
   int bytes_not_written;
@@ -306,7 +291,10 @@ _kernel_oserror *fdtable_write(int fd, void *buf, size_t count, int *bytes_writt
       err = systemfiletable_get_file_length(openfile_entry->systemtable_idx,
 					    &openfile_entry->file_offset);
       if (err)
-	goto error_return;
+	{
+	  LOG("%s: Error=%s",__func__, err->errmess);
+	  return err;
+	}
     }
 
   err = systemfiletable_write_bytes(openfile_entry->systemtable_idx,
@@ -314,17 +302,10 @@ _kernel_oserror *fdtable_write(int fd, void *buf, size_t count, int *bytes_writt
 			      count,
 			      &openfile_entry->file_offset,
 			      &bytes_not_written);
-  if (err)
-    goto error_return;
-
-  *bytes_written = count - bytes_not_written;
-
-  return NULL;
-
-error_return:
-  LOG("%s:   Error=%s", __func__, err->errmess);
-
-  *bytes_written = 0;
+  if (!err)
+    *bytes_written = count - bytes_not_written;
+  else
+    LOG("%s: Error=%s",__func__, err->errmess);
 
   return err;
 }

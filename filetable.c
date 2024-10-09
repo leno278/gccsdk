@@ -30,8 +30,8 @@ static int file_object_type(const char *canon_filename)
   _kernel_oserror *err;
   int object_type;
   err = _swix(OS_File,
-	      _INR(0,1) | _OUT(1),
-	      0x5,		/*  in: r0=reason code - Read catalogue info for object */
+	      _INR(0,1) | _OUT(0),
+	      17,		/*  in: r0=reason code - Read catalogue info for object, no path */
 	      canon_filename,	/*  in: r1=filename */
 	      &object_type);	/* out: r0=object type, 0=not found, 1=file, 2=directory, 3=image */
   if (err)
@@ -83,6 +83,9 @@ static _kernel_oserror *osfile_open(const char *canon_filename, int *handle)
 
 static inline _kernel_oserror *osfile_close(int handle)
 {
+  if (handle == 0)
+    return NULL;
+
   return _swix(OS_Find,
 	       _INR(0,1),
 	       0x0,		/* in: r0=close file */
@@ -143,7 +146,7 @@ static _kernel_oserror *osgbpb_write_bytes_at(int file_handle,
 {
   return _swix(OS_GBPB,
 	       _INR(0,4) | _OUTR(3,4),
-	       0x0,		/*   in: r0=reason code - write bytes from given offset */
+	       0x1,		/*   in: r0=reason code - write bytes at given offset */
 	       file_handle,	/*   in: r1=handle */
 	       buf,		/*   in: r2=buffer */
 	       count,		/*   in: r3=number of bytes to write */
@@ -165,6 +168,7 @@ static _kernel_oserror *systemfiletable_add_entry(const char *canon_name, int fl
   int type = file_object_type(canon_name);
   if (flags & O_CREAT)
     {
+      LOG("%s: O_CREAT specified, type=%d", __func__, type);
       if (type == OBJECT_TYPE_NOT_FOUND)
 	{
 	  err = osfile_create(canon_name, &file_handle);
@@ -188,7 +192,12 @@ static _kernel_oserror *systemfiletable_add_entry(const char *canon_name, int fl
     }
 
   if (err)
-    return err;
+    goto error_return;
+  if (!file_handle)
+    {
+      err = armeabisupport_EOPSYS;
+      goto error_return;
+    }
 
   int i;
   for (i = 0; i < filetable->num_entries; i++)

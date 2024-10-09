@@ -44,9 +44,9 @@ _kernel_oserror *array_alloc(array_t *table)
     {
       new_size = ARRAY_INIT_NUM_ENTRIES;
       new_table = malloc(new_size * table->entry_size);
-      LOG("%d:%s: creating array of %d elements (%d bytes)",
-	  __LINE__, __func__, new_size, new_size * table->entry_size);
-      LOG("%d:%s: array ptr = %p", __LINE__, __func__, new_table);
+      LOG("%%s: creating array of %d elements (%d bytes)",
+	  __func__, new_size, new_size * table->entry_size);
+      LOG("%s: array ptr = %p", __func__, new_table);
       if (!new_table)
 	return armeabisupport_ENOMEM;
       memset_clear_start = new_table;
@@ -55,10 +55,10 @@ _kernel_oserror *array_alloc(array_t *table)
   else
     {
       new_size = table->num_entries * 2;
-      LOG("%d:%s: resizing array from %d to %d elements (%d bytes)", __LINE__, __func__,
+      LOG("%s: resizing array from %d to %d elements (%d bytes)", __func__,
 	  table->num_entries, new_size, new_size * table->entry_size);
       new_table = realloc(table->entries, new_size * table->entry_size);
-      LOG("%d:%s: new array ptr = %p", __LINE__, __func__, new_table);
+      LOG("%s: new array ptr = %p", __func__, new_table);
       if (!new_table)
 	return armeabisupport_ENOMEM;
       memset_clear_start = new_table + table->num_entries * table->entry_size;

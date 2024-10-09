@@ -44,7 +44,7 @@ _kernel_oserror *array_alloc(array_t *table)
     {
       new_size = ARRAY_INIT_NUM_ENTRIES;
       new_table = malloc(new_size * table->entry_size);
-      LOG("%%s: creating array of %d elements (%d bytes)",
+      LOG("%s: creating array of %d elements (%d bytes)",
 	  __func__, new_size, new_size * table->entry_size);
       LOG("%s: array ptr = %p", __func__, new_table);
       if (!new_table)

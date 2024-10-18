@@ -40,6 +40,29 @@ static int file_object_type(const char *canon_filename)
   return object_type;
 }
 
+static _kernel_oserror *osfile_read_file_info(const char *canon_filename,
+					      int *object_type,
+					      void **load,
+					      void **exec,
+					      off_t *length,
+					      unsigned *attributes)
+{
+  _kernel_oserror *err;
+  err = _swix(OS_File,
+	      _INR(0,1) | _OUT(0) | _OUTR(2,5),
+	      17,		/*  in: r0=reason code - Read catalogue info for object, no path */
+	      canon_filename,	/*  in: r1=filename */
+	      object_type,	/* out: r0=object type, 0=not found, 1=file, 2=directory, 3=image */
+	      load,
+	      exec,
+	      length,
+	      attributes);
+  LOG("%s: %s", __func__, canon_filename);
+  LOG("%s: type=%d load=%p exec=%p len=%d attr=%X", __func__, *object_type, *load, *exec, *length, *attributes);
+
+  return err;
+}
+
 /* See if we already have the file open and return the index if so, otherwise -1.  */
 static int filetable_scan_for_canon_filename(const char *canon_filename)
 {
@@ -346,6 +369,23 @@ _kernel_oserror *systemfiletable_write_bytes(int filetable_idx,
 			       *file_ptr,
 			       bytes_not_written,
 			       file_ptr);
+}
+
+_kernel_oserror *
+systemfiletable_get_info(int filetable_idx,
+			 int *type,
+			 const char **name,
+			 void **load,
+			 void **exec,
+			 off_t *length,
+			 unsigned *attributes)
+{
+  array_t *filetable = &global.system_filetable;
+  systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
+
+  *name = entry[filetable_idx].filename;
+
+  return osfile_read_file_info(entry[filetable_idx].filename, type, load, exec, length, attributes);
 }
 
 void systemfiletable_print(void)

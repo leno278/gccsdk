@@ -48,6 +48,16 @@ typedef struct _systemfiletable_entry
 
 _kernel_oserror *systemfiletable_open_file(const char *file, int flags, int mode, int *);
 _kernel_oserror *systemfiletable_close_file(int filetable_idx);
+
+_kernel_oserror *
+systemfiletable_get_info(int filetable_idx,
+			 int *type,
+			 const char **name,
+			 void **load,
+			 void **exec,
+			 off_t *length,
+			 unsigned *attributes);
+
 _kernel_oserror *systemfiletable_get_file_length(int filetable_idx, off_t *length);
 _kernel_oserror *systemfiletable_read_bytes(int fd, void *buf, size_t count, off_t *, int *bytes_not_read);
 _kernel_oserror *systemfiletable_write_bytes(int fd, void *buf, size_t count, off_t *, int *bytes_not_written);

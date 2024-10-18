@@ -18,9 +18,12 @@
 #include <sys/mman.h>
 #include <string.h>
 
-#define LOGGING 0
-#define TRACING 0
-#define TRACE_SWIS 0
+#define ENABLE_TRACING 0
+#define ENABLE_SWI_TRACING 0
+#include "trace.h"
+
+#define ENABLE_LOGGING 0
+#include "log.h"
 
 #define MMAP_MAX_DA_SIZE (100 * 1024 * 1024)
 
@@ -32,19 +35,6 @@
 #define MMAPOP_REMAP	5
 #define MMAPOP_GET_PROT	6
 #define MMAPOP_DUMP	16
-
-#if LOGGING
-#define LOG(format,...) reporter_printf(format, ##__VA_ARGS__)
-#else
-#define LOG(format,...)
-#endif
-
-#undef TRACE
-#if TRACING
-#define TRACE(format,...) reporter_printf(format, ##__VA_ARGS__)
-#else
-#define TRACE(format,...)
-#endif
 
 #if TRACE_SWIS
 #define TRACE_SWI(format,...) reporter_printf(format, ##__VA_ARGS__)

@@ -7,11 +7,18 @@
 #include "fileop.h"
 #include "fdtable.h"
 
+#define ENABLE_LOGGING 1
+#include "log.h"
+
 #define FILEOP_OPEN	0
 #define FILEOP_CLOSE	1
 #define FILEOP_SEEK	2
 #define FILEOP_READ	3
 #define FILEOP_WRITE	4
+#define FILEOP_GETINFO	5
+#define FILEOP_LOCK	6
+#define FILEOP_UNLOCK	7
+#define FILEOP_GETLOCK	8
 
 /* r0 = reason code:
  *	0 - file open
@@ -45,6 +52,16 @@
  *	    r3 = count
  *	  Exit:
  *	    r0 = number of bytes written
+ *	5 - GetInfo
+ *	  Entry:
+ *	    r1 = fd
+ *	  Exit:
+ *	    r0 = object type (Redundant as we only operate on regular files?)
+ *	    r1 = filename
+ *	    r2 = loadaddr
+ *	    r3 = execaddr
+ *	    r4 = length
+ *	    r5 = attributes
 */
 _kernel_oserror *
 file_op(_kernel_swi_regs *r)
@@ -71,6 +88,15 @@ file_op(_kernel_swi_regs *r)
     break;
   case FILEOP_WRITE:
     err = fdtable_write(r->r[1], (void *)r->r[2], r->r[3], &r->r[0]);
+    break;
+  case FILEOP_GETINFO:
+    err = fdtable_get_info(r->r[1],
+			   &r->r[0],
+			   (const char **)&r->r[1],
+			   (void **)&r->r[2],
+			   (void **)&r->r[3],
+			   (off_t *)&r->r[4],
+			   (unsigned *)&r->r[5]);
     break;
   }
 

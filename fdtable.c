@@ -310,6 +310,32 @@ _kernel_oserror *fdtable_write(int fd, void *buf, size_t count, int *bytes_writt
   return err;
 }
 
+_kernel_oserror *
+fdtable_get_info(int fd,
+		 int *type,
+		 const char **name,
+		 void **load,
+		 void **exec,
+		 off_t *length,
+		 unsigned *attributes)
+{
+  fdtable_entry *fd_entry = get_fdtable_entry(fd);
+  if (!fd_entry)
+    return armeabisupport_EBADF;
+
+  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
+  if (!openfile_entry)
+    return armeabisupport_EBADF;
+
+  return systemfiletable_get_info(openfile_entry->systemtable_idx,
+				  type,
+				  name,
+				  load,
+				  exec,
+				  length,
+				  attributes);
+}
+
 void fdtable_destroy(array_t *table)
 {
   fdtable_entry *fd_entry = (fdtable_entry *)table->entries;

@@ -18,4 +18,13 @@ reporter_printf(format, ##__VA_ARGS__); \
 #define TRACE(format,...)
 #endif
 
+#if ENABLE_SWI_TRACING
+#define TRACE_SWI(format, ...) \
+do {\
+reporter_printf(format, ##__VA_ARGS__); \
+} while (0)
+#else
+#define TRACE_SWI(format,...)
+#endif
+
 #endif

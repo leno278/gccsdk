@@ -33,4 +33,9 @@ static inline void array_dtor(array_t *this)
   array_free(this);
 }
 
+static inline array_entry_base *array_get_entry(array_t *this, int index)
+{
+  return (array_entry_base *)((unsigned)this->entries + (index * this->entry_size));
+}
+
 #endif

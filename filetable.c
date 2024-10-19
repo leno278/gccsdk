@@ -57,9 +57,6 @@ static _kernel_oserror *osfile_read_file_info(const char *canon_filename,
 	      exec,
 	      length,
 	      attributes);
-  LOG("%s: %s", __func__, canon_filename);
-  LOG("%s: type=%d load=%p exec=%p len=%d attr=%X", __func__, *object_type, *load, *exec, *length, *attributes);
-
   return err;
 }
 
@@ -224,7 +221,7 @@ static _kernel_oserror *systemfiletable_add_entry(const char *canon_name, int fl
 
   int i;
   for (i = 0; i < filetable->num_entries; i++)
-    if (filetable->entries[i].in_use == 0)
+    if (array_get_entry(filetable, i)->in_use == 0)
       {
 	LOG("%s:   Found free entry at index %d", __func__, i);
 	break;
@@ -412,7 +409,7 @@ _kernel_oserror *openfiletable_add_entry(int systemtable_idx, int flags, int mod
 
   int i;
   for (i = 0; i < filetable->num_entries; i++)
-    if (filetable->entries[i].in_use == 0)
+    if (array_get_entry(filetable, i)->in_use == 0)
       {
 	LOG("%s:   Found free entry at index %d", __func__, i);
 	break;

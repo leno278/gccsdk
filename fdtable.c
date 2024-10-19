@@ -103,7 +103,7 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
 
   int i;
   for (i = 0; i < fdtable->num_entries; i++)
-    if (fdtable->entries[i].in_use == 0)
+    if (array_get_entry(fdtable, i)->in_use == 0)
       {
 	LOG("%s:   Found free entry at index %d", __func__, i);
 	break;

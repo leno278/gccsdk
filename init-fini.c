@@ -150,6 +150,13 @@ _kernel_oserror *module_finalisation (int fatal, int podule_base, void *pw)
   // Remove all mmap allocations and allocators.
   allocator_destroy_all(&global.mmap_allocator_pool);
 
+  for (int i = 0; i < global.open_filetable.num_entries; i++)
+    if (global.open_filetable.entries[i].in_use)
+      {
+	openfiletable_entry *entry = openfiletable_get_entry(i);
+	filelocklist_dtor(&entry->locks);
+      }
+
   array_dtor(&global.open_filetable);
   array_dtor(&global.system_filetable);
 

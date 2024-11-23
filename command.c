@@ -15,6 +15,7 @@
 #include "shm.h"
 #include "filedesc.h"
 #include "filetable.h"
+#include "lock.h"
 #include "debug.h"
 
 static void
@@ -63,6 +64,9 @@ module_command (const char *arg_string, int argc, int number, void *pw)
     {
     case CMD_ARMEABISupport_Info:
       command_info ();
+      break;
+    case CMD_ARMEABISupport_lslocks:
+      filelocklist_lslocks ();
       break;
     }
 

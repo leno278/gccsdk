@@ -23,11 +23,8 @@
 
 #define FDTABLE_BASE_FD 10000
 
-static inline fdtable_entry *get_fdtable_entry(int fd)
+fdtable_entry *get_fdtable_entry(app_object *app, int fd)
 {
-  app_object *app;
-  if ((app_find(&app)) != NULL)
-    return NULL;
   array_t *fdtable = &app->fd_table;
   fdtable_entry *entry = (fdtable_entry *)fdtable->entries;
 
@@ -103,7 +100,7 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
 
   int i;
   for (i = 0; i < fdtable->num_entries; i++)
-    if (array_get_entry(fdtable, i)->in_use == 0)
+    if (array_get_entry_ptr(fdtable, i)->in_use == 0)
       {
 	LOG("%s:   Found free entry at index %d", __func__, i);
 	break;
@@ -150,12 +147,22 @@ error_return:
 
 _kernel_oserror *fdtable_close_file(int fd)
 {
-  fdtable_entry *fd_entry = get_fdtable_entry(fd);
+  _kernel_oserror *err;
+  app_object *app;
+  if ((err = app_find(&app)) != NULL)
+    return err;
+
+  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
   if (!fd_entry || fd_entry->base.in_use == 0)
     return armeabisupport_EBADF;
 
   TRACE("%s: fd=%d", __func__, fd);
 
+  /* IEEE Std 1003.1-1988 (“POSIX.1”) requires that all locks associated
+   * with a file for a given process are removed when any file descriptor for
+   * that file is closed by that process.
+   */
+  filelocklist_clear_locks(app, fd_entry->opentable_idx);
   openfiletable_deref_entry(fd_entry->opentable_idx);
 
   fd_entry->base.in_use = 0;
@@ -166,7 +173,11 @@ _kernel_oserror *fdtable_close_file(int fd)
 _kernel_oserror *fdtable_lseek(int fd, off_t offset, int whence, off_t *offset_ret)
 {
   _kernel_oserror *err = NULL;
-  fdtable_entry *fd_entry = get_fdtable_entry(fd);
+  app_object *app;
+  if ((err = app_find(&app)) != NULL)
+    return err;
+
+  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
   if (!fd_entry)
     {
       *offset_ret = (off_t)-1;
@@ -219,8 +230,6 @@ _kernel_oserror *fdtable_lseek(int fd, off_t offset, int whence, off_t *offset_r
 
   *offset_ret = openfile_entry->file_offset = new_offset;
 
-  LOG("%s: new_offset = %ld", __func__, new_offset);
-
   if (new_offset < 0)
     err = armeabisupport_EINVAL;
 
@@ -235,18 +244,26 @@ _kernel_oserror *fdtable_read(int fd, void *buf, size_t count, int *bytes_read)
   *bytes_read = 0;
 
   _kernel_oserror *err;
-  fdtable_entry *fd_entry = get_fdtable_entry(fd);
+  app_object *app;
+  if ((err = app_find(&app)) != NULL)
+    return err;
+
+  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
   if (!fd_entry)
     return armeabisupport_EBADF;
 
-  TRACE("%s: fd=%d, buf=0x%X, count=%d", __func__, fd, buf, count);
+  TRACE("%s: fd=%d, buf=%p, count=%ld", __func__, fd, buf, count);
 
   openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
 
   if ((openfile_entry->flags & O_ACCMODE) == O_WRONLY)
       return armeabisupport_EBADF;
 
-  if (count == 0)
+  off_t file_length;
+  if ((err = systemfiletable_get_file_length(openfile_entry->systemtable_idx, &file_length)) != NULL)
+    return armeabisupport_EINVAL;
+
+  if (count == 0 || openfile_entry->file_offset >= file_length)
     {
       *bytes_read = 0;
       return NULL;
@@ -271,11 +288,15 @@ _kernel_oserror *fdtable_write(int fd, void *buf, size_t count, int *bytes_writt
   *bytes_written = 0;
 
   _kernel_oserror *err;
-  fdtable_entry *fd_entry = get_fdtable_entry(fd);
+  app_object *app;
+  if ((err = app_find(&app)) != NULL)
+    return err;
+
+  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
   if (!fd_entry)
     return armeabisupport_EBADF;
 
-  TRACE("%s: fd=%d, buf=0x%X, count=%d", __func__, fd, buf, count);
+  TRACE("%s: fd=%d, buf=%p, count=%ld", __func__, fd, buf, count);
 
   openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
 
@@ -319,7 +340,12 @@ fdtable_get_info(int fd,
 		 off_t *length,
 		 unsigned *attributes)
 {
-  fdtable_entry *fd_entry = get_fdtable_entry(fd);
+  _kernel_oserror *err;
+  app_object *app;
+  if ((err = app_find(&app)) != NULL)
+    return err;
+
+  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
   if (!fd_entry)
     return armeabisupport_EBADF;
 
@@ -336,6 +362,151 @@ fdtable_get_info(int fd,
 				  attributes);
 }
 
+/* If the returned end == NULL, then end should be interpreted as end of file.  */
+static _kernel_oserror *
+get_start_end_offsets(openfiletable_entry *openfile_entry,
+		      int whence,
+		      off_t offset,
+		      off_t len,
+		      off_t *start,
+		      off_t *end)
+{
+  _kernel_oserror *err;
+  off_t file_length;
+  if ((err = systemfiletable_get_file_length(openfile_entry->systemtable_idx,
+					     &file_length)) == NULL)
+    {
+      switch (whence)
+	{
+	case SEEK_SET:
+	  if (len < 0)
+	    {
+	      *start = offset + len;
+	      *end = offset;
+	    }
+	  else
+	    *start = offset;
+	  break;
+	case SEEK_CUR:
+	  if (len < 0)
+	    {
+	      *start = openfile_entry->file_offset + offset + len;
+	      *end = openfile_entry->file_offset + offset;
+	    }
+	  else
+	    *start = openfile_entry->file_offset + offset;
+	  break;
+	case SEEK_END:
+	  if (len < 0)
+	    {
+	      *start = file_length + offset + len;
+	      *end = file_length + offset;
+	    }
+	  else
+	    *start = file_length + offset;
+	  break;
+	default:
+	  return armeabisupport_EINVAL;
+	}
+
+      if (len >= 0)
+	*end = (len == 0) ? 0 : *start + len;
+    }
+
+  return err;
+}
+
+_kernel_oserror *
+fdtable_get_lock(int fd, int *type, int *whence, off_t *offset, off_t *len)
+{
+  app_object *app;
+  if (app_find(&app) != NULL)
+    return armeabisupport_EINVAL;
+
+  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
+  if (!fd_entry)
+    return armeabisupport_EBADF;
+
+  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
+  if (!openfile_entry)
+    return armeabisupport_EBADF;
+
+  TRACE("%s: fd=%d, type=%d, whence=%d, offset=%ld, len=%ld", __func__, fd, *type, *whence, *offset, *len);
+
+  _kernel_oserror *err;
+  off_t start, end;
+  if ((err = get_start_end_offsets(openfile_entry, *whence, *offset, *len, &start, &end)) != NULL)
+    return err;
+
+  if (filelocklist_get_lock(&openfile_entry->locks,
+			    fd_entry->opentable_idx,
+			    &start,
+			    &end,
+			    type))
+    {
+      *whence = SEEK_SET;
+      *offset = start;
+      *len = (end == 0) ? 0 : end - start;
+    }
+  else
+    *type = F_UNLCK;
+
+  return NULL;
+}
+
+_kernel_oserror *
+fdtable_set_lock(int fd, int *type, int *whence, off_t *offset, off_t *len)
+{
+  app_object *app;
+  if (app_find(&app) != NULL)
+    return armeabisupport_EINVAL;
+
+  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
+  if (!fd_entry)
+    return armeabisupport_EBADF;
+
+  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
+  if (!openfile_entry)
+    return armeabisupport_EBADF;
+
+  TRACE("%s: fd=%d, type=%d, whence=%d, offset=%ld, len=%ld", __func__, fd, *type, *whence, *offset, *len);
+
+  _kernel_oserror *err;
+  off_t start, end;
+  if ((err = get_start_end_offsets(openfile_entry, *whence, *offset, *len, &start, &end)) != NULL)
+    return err;
+
+  return *type == F_UNLCK
+	? filelocklist_remove_lock(app,
+				   fd_entry->opentable_idx,
+				   start,
+				   end)
+	: filelocklist_add_lock(app,
+				fd_entry->opentable_idx,
+				start,
+				end,
+				*type);
+}
+
+_kernel_oserror *fdtable_fsync(int fd)
+{
+  app_object *app;
+  if (app_find(&app) != NULL)
+    return armeabisupport_EINVAL;
+
+  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
+  if (!fd_entry)
+    return armeabisupport_EBADF;
+
+  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
+  if (!openfile_entry)
+    return armeabisupport_EBADF;
+
+  TRACE("%s: fd=%d", __func__, fd);
+
+  return systemfiletable_fsync(openfile_entry->systemtable_idx);
+}
+
 void fdtable_destroy(array_t *table)
 {
   fdtable_entry *fd_entry = (fdtable_entry *)table->entries;
@@ -350,13 +521,13 @@ void fdtable_print(void)
   if ((app_find(&app)) != NULL)
     return;
   array_t *table = &app->fd_table;
-  fdtable_entry *entry = (fdtable_entry *)table->entries;
+  fdtable_entry *fdentry = (fdtable_entry *)table->entries;
 
-  LOG("fd table:");
-  LOG("%-8s %s", "fd", "OpenTableIdx");
+  LOG("%-8s %s", "FD", "PATH");
   for (int i = 0; i < table->num_entries; i++)
-    if (entry[i].base.in_use)
+    if (fdentry[i].base.in_use)
       {
-	LOG("%-8d %d", i + FDTABLE_BASE_FD, entry[i].opentable_idx);
+	openfiletable_entry *open_entry = openfiletable_get_entry(fdentry[i].opentable_idx);
+	LOG("%-8d %s", i + FDTABLE_BASE_FD, systemfiletable_get_filename(open_entry->systemtable_idx));
       }
 }

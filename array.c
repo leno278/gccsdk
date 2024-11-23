@@ -8,11 +8,12 @@
 #include "armeabisupport.h"
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
-#define ENABLE_TRACING 1
+#define ENABLE_TRACING 0
 #include "trace.h"
 
-#define ENABLE_LOGGING 1
+#define ENABLE_LOGGING 0
 #include "log.h"
 
 _kernel_oserror *array_ctor(array_t *this, const int entry_size)
@@ -82,4 +83,30 @@ void array_free(array_t *table)
       free(table->entries);
       table->entries = NULL;
     }
+}
+
+array_entry_base *array_alloc_entry(array_t *this)
+{
+  int i;
+  for (i = 0; i < this->num_entries; i++)
+    if (array_get_entry_ptr(this, i)->in_use == 0)
+      {
+	LOG("%s:   Found free entry at index %d", __func__, i);
+	break;
+      }
+
+  if (i == this->num_entries)
+    {
+      LOG("%s:   No free entries (i=%d), extending array", __func__, i);
+      /* No free entries, increase array.  */
+      _kernel_oserror *err = array_alloc(this);
+      if (err)
+	return NULL;
+      i = (this->num_entries == ARRAY_INIT_NUM_ENTRIES) ? 0 : this->num_entries / 2;
+    }
+
+  array_entry_base *entry = array_get_entry_ptr(this, i);
+  array_entry_mark_used(entry);
+
+  return entry;
 }

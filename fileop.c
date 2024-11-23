@@ -16,9 +16,9 @@
 #define FILEOP_READ	3
 #define FILEOP_WRITE	4
 #define FILEOP_GETINFO	5
-#define FILEOP_LOCK	6
-#define FILEOP_UNLOCK	7
-#define FILEOP_GETLOCK	8
+#define FILEOP_SETLOCK	6
+#define FILEOP_GETLOCK	7
+#define FILEOP_FSYNC	8
 
 /* r0 = reason code:
  *	0 - file open
@@ -62,6 +62,28 @@
  *	    r3 = execaddr
  *	    r4 = length
  *	    r5 = attributes
+ *	6 - SetLock
+ *	  Entry:
+ *	    r1 = fd
+ *	    r2 = type
+ *	    r3 = whence
+ *	    r4 = start
+ *	    r5 = len
+ *	7 - GetLock
+ *	  Entry:
+ *	    r1 = fd
+ *	    r2 = type
+ *	    r3 = whence
+ *	    r4 = start
+ *	    r5 = len
+ *	  Exit:
+ *	    r2 = type updated
+ *	    r3 = whence updated
+ *	    r4 = start updated
+ *	    r5 = len updated
+ *	8 - fsync
+ *	  Entry:
+ *	    r1 = fd
 */
 _kernel_oserror *
 file_op(_kernel_swi_regs *r)
@@ -97,6 +119,23 @@ file_op(_kernel_swi_regs *r)
 			   (void **)&r->r[3],
 			   (off_t *)&r->r[4],
 			   (unsigned *)&r->r[5]);
+    break;
+  case FILEOP_SETLOCK:
+    err = fdtable_set_lock(r->r[1],
+			   &r->r[2],		/* type */
+			   &r->r[3],		/* whence */
+			   (off_t *)&r->r[4],	/* start */
+			   (off_t *)&r->r[5]);	/* len */
+    break;
+  case FILEOP_GETLOCK:
+    err = fdtable_get_lock(r->r[1],
+			   &r->r[2],		/* type */
+			   &r->r[3],		/* whence */
+			   (off_t *)&r->r[4],	/* start */
+			   (off_t *)&r->r[5]);	/* len */
+    break;
+  case FILEOP_FSYNC:
+    err = fdtable_fsync(r->r[1]);
     break;
   }
 

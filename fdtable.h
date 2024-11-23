@@ -8,6 +8,7 @@
 #define FDTABLE_H
 
 #include "array.h"
+#include "types.h"
 #include <unistd.h>
 
 typedef struct _fdtable_entry
@@ -18,6 +19,7 @@ typedef struct _fdtable_entry
 
 } fdtable_entry;
 
+fdtable_entry *get_fdtable_entry(app_object *app, int fd);
 void fdtable_destroy(array_t *);
 _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *fd_ret);
 _kernel_oserror *fdtable_close_file(int fd);
@@ -33,6 +35,12 @@ fdtable_get_info(int fd,
 		 void **exec,
 		 off_t *length,
 		 unsigned *attributes);
+
+_kernel_oserror *
+fdtable_get_lock(int fd, int *type, int *whence, off_t *start, off_t *len);
+_kernel_oserror *
+fdtable_set_lock(int fd, int *type, int *whence, off_t *start, off_t *len);
+_kernel_oserror *fdtable_fsync(int fd);
 
 void fdtable_print(void);
 

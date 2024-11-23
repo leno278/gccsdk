@@ -12,7 +12,6 @@
 #if ENABLE_LOGGING
 #define LOG(format,...) \
 do { \
-  printf(format "\n", ##__VA_ARGS__); \
   reporter_printf(format, ##__VA_ARGS__); \
 } while (0)
 #else

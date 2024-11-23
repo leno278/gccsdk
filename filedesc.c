@@ -6,6 +6,7 @@
 
 #include "armeabisupport.h"
 #include "filedesc.h"
+#include "fdtable.h"
 #include "array.h"
 #include "shm.h"
 #include "memory.h"
@@ -57,13 +58,22 @@ fd_op(_kernel_swi_regs *r)
   switch (reason)
   {
   case FDOP_VALIDATE_FD: {
-    filedesc *fd = filedesc_find_fd(r->r[1]);
-    if (fd)
-      r->r[1] = fd->type;
-    else {
-      r->r[1] = fdtype_INVALID;
-      err = armeabisupport_EBADF;
-    }
+    app_object *app;
+    err = app_find(&app);
+    if (err)
+      break;
+    if (get_fdtable_entry(app, r->r[1]))
+      r->r[1] = fdtype_SHARED_FILE;
+    else
+      {
+	filedesc *fd = filedesc_find_fd(r->r[1]);
+	if (fd)
+	  r->r[1] = fd->type;
+	else {
+	  r->r[1] = fdtype_INVALID;
+	  err = armeabisupport_EBADF;
+	}
+      }
     break;
   }
   case FDOP_CLOSE_FD:

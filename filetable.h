@@ -35,12 +35,21 @@ static inline openfiletable_entry *openfiletable_get_entry(int idx)
   return &openfile_entry[idx];
 }
 
-static _kernel_oserror *osargs_flush_file(int file_handle)
+static inline _kernel_oserror *osargs_flush_file(int file_handle)
 {
   return _swix(OS_Args,
 	       _INR(0,1),
 	       255,		/* in: r0=reason code - flush file */
 	       file_handle);	/* in: r1=file handle */
+}
+
+static inline _kernel_oserror *osargs_write_file_extent(int file_handle, off_t new_extent)
+{
+  return _swix(OS_Args,
+	       _INR(0,2),
+	       0x3,		/* in: r0=reason code - write extent */
+	       file_handle,	/* in: r1=handle */
+	       new_extent);	/* in: r2=new_extent */
 }
 
 _kernel_oserror *openfiletable_add_entry(int systemtable_idx, int flags, int mode, int *idx_ret);
@@ -80,6 +89,15 @@ static inline _kernel_oserror *systemfiletable_fsync(int systemtable_idx)
   systemfiletable_entry *entry = (systemfiletable_entry *)array_get_entry_ptr(system_filetable, systemtable_idx);
 
   return osargs_flush_file(entry->file_handle);
+}
+
+static inline _kernel_oserror *
+systemfiletable_ftruncate(int systemtable_idx, off_t new_extent)
+{
+  array_t *system_filetable = &global.system_filetable;
+  systemfiletable_entry *entry = (systemfiletable_entry *)array_get_entry_ptr(system_filetable, systemtable_idx);
+
+  return osargs_write_file_extent(entry->file_handle, new_extent);
 }
 
 void systemfiletable_print(void);

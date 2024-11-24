@@ -7,18 +7,19 @@
 #include "fileop.h"
 #include "fdtable.h"
 
-#define ENABLE_LOGGING 1
+#define ENABLE_LOGGING 0
 #include "log.h"
 
-#define FILEOP_OPEN	0
-#define FILEOP_CLOSE	1
-#define FILEOP_SEEK	2
-#define FILEOP_READ	3
-#define FILEOP_WRITE	4
-#define FILEOP_GETINFO	5
-#define FILEOP_SETLOCK	6
-#define FILEOP_GETLOCK	7
-#define FILEOP_FSYNC	8
+#define FILEOP_OPEN		0
+#define FILEOP_CLOSE		1
+#define FILEOP_SEEK		2
+#define FILEOP_READ		3
+#define FILEOP_WRITE		4
+#define FILEOP_GETINFO		5
+#define FILEOP_SETLOCK		6
+#define FILEOP_GETLOCK		7
+#define FILEOP_FSYNC		8
+#define FILEOP_FTRUNCATE	9
 
 /* r0 = reason code:
  *	0 - file open
@@ -84,6 +85,10 @@
  *	8 - fsync
  *	  Entry:
  *	    r1 = fd
+ *	9 - ftruncate
+ *	  Entry:
+ *	    r1 = fd
+ *	    r2 = new extent
 */
 _kernel_oserror *
 file_op(_kernel_swi_regs *r)
@@ -136,6 +141,9 @@ file_op(_kernel_swi_regs *r)
     break;
   case FILEOP_FSYNC:
     err = fdtable_fsync(r->r[1]);
+    break;
+  case FILEOP_FTRUNCATE:
+    err = fdtable_ftruncate(r->r[1], r->r[2]);
     break;
   }
 

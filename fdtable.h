@@ -41,6 +41,7 @@ fdtable_get_lock(int fd, int *type, int *whence, off_t *start, off_t *len);
 _kernel_oserror *
 fdtable_set_lock(int fd, int *type, int *whence, off_t *start, off_t *len);
 _kernel_oserror *fdtable_fsync(int fd);
+_kernel_oserror *fdtable_ftruncate(int fd, off_t new_extent);
 
 void fdtable_print(void);
 

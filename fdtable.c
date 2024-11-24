@@ -7,6 +7,7 @@
 #include "armeabisupport.h"
 #include "fdtable.h"
 #include "filetable.h"
+#include "filedesc.h"
 #include "types.h"
 #include "main.h"
 #include <kernel.h>
@@ -15,10 +16,10 @@
 #include <swis.h>
 #include <limits.h>
 
-#define ENABLE_TRACING 1
+#define ENABLE_TRACING 0
 #include "trace.h"
 
-#define ENABLE_LOGGING 1
+#define ENABLE_LOGGING 0
 #include "log.h"
 
 #define FDTABLE_BASE_FD 10000
@@ -507,6 +508,31 @@ _kernel_oserror *fdtable_fsync(int fd)
   return systemfiletable_fsync(openfile_entry->systemtable_idx);
 }
 
+_kernel_oserror *fdtable_ftruncate(int fd, off_t new_extent)
+{
+  app_object *app;
+  if (app_find(&app) != NULL)
+    return armeabisupport_EINVAL;
+
+  if (filedesc_find_fd(fd) != NULL)
+    {
+      /* This is a shared memory object which is currently a no-op for ftruncate.  */
+      return NULL;
+    }
+
+  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
+  if (!fd_entry)
+    return armeabisupport_EBADF;
+
+  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
+  if (!openfile_entry)
+    return armeabisupport_EBADF;
+
+  TRACE("%s: fd=%d, new_extent=%ld", __func__, fd, new_extent);
+
+  return systemfiletable_ftruncate(openfile_entry->systemtable_idx, new_extent);
+}
+
 void fdtable_destroy(array_t *table)
 {
   fdtable_entry *fd_entry = (fdtable_entry *)table->entries;
@@ -523,11 +549,11 @@ void fdtable_print(void)
   array_t *table = &app->fd_table;
   fdtable_entry *fdentry = (fdtable_entry *)table->entries;
 
-  LOG("%-8s %s", "FD", "PATH");
+  printf("%-8s %s", "FD", "PATH");
   for (int i = 0; i < table->num_entries; i++)
     if (fdentry[i].base.in_use)
       {
 	openfiletable_entry *open_entry = openfiletable_get_entry(fdentry[i].opentable_idx);
-	LOG("%-8d %s", i + FDTABLE_BASE_FD, systemfiletable_get_filename(open_entry->systemtable_idx));
+	printf("%-8d %s", i + FDTABLE_BASE_FD, systemfiletable_get_filename(open_entry->systemtable_idx));
       }
 }

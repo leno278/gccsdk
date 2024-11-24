@@ -16,7 +16,7 @@
 #include "filetable.h"
 #include "mmap.h"
 
-#define ENABLE_TRACING 1
+#define ENABLE_TRACING 0
 #include "trace.h"
 
 static const char filter_name[] = "ARMEABISupport";

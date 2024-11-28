@@ -79,6 +79,9 @@ fd_op(_kernel_swi_regs *r)
   case FDOP_CLOSE_FD:
     err = filedesc_close(r->r[1]);
     break;
+  default:
+    err = armeabisupport_bad_reason;
+    break;
   }
 
   return err;

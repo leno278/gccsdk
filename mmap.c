@@ -10,6 +10,7 @@
 #include "abort.h"
 #include "shm.h"
 #include "filedesc.h"
+#include "fdtable.h"
 #include "main.h"
 #include "swi.h"
 #include "debug.h"
@@ -228,6 +229,9 @@ mmap_op(_kernel_swi_regs *r)
     case MMAPOP_DUMP:
       mmap_dump();
       break;
+    default:
+      err = armeabisupport_bad_reason;
+      break;
   }
 
   if (err)
@@ -345,12 +349,21 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
   if (flags & MAP_FIXED)
     return armeabisupport_EINVAL;
 
+  _kernel_oserror *err;
   filedesc *shm_fd = filedesc_find_fd(fd);
   if (fd != -1 && !shm_fd)
     {
-      /* We were given a file descriptor, but it doesn't match any that we know of.  */
-      LOG("armeabi_mmap: Invalid fd (%d)", fd);
-      return armeabisupport_EBADF;
+      app_object *app;
+      if ((err = app_find(&app)) != NULL)
+	return err;
+
+      fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
+      if (!fd_entry || fd_entry->base.in_use == 0)
+	{
+	  /* We were given a file descriptor, but it doesn't match any that we know of.  */
+	  LOG("armeabi_mmap: Invalid fd (%d)", fd);
+	  return armeabisupport_EBADF;
+	}
     }
 
   shm_object *shm = NULL;
@@ -377,7 +390,6 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
     }
 
   armeabisupport_allocator *allocator;
-  _kernel_oserror *err;
 
   *allocator_ret = NULL;
   *block_ret = NULL;

@@ -528,7 +528,8 @@ _kernel_oserror *fdtable_ftruncate(int fd, off_t new_extent)
   if (!openfile_entry)
     return armeabisupport_EBADF;
 
-  TRACE("%s: fd=%d, new_extent=%ld", __func__, fd, new_extent);
+  TRACE("%s: fd=%d, new_extent=%ld, path=%s",
+	__func__, fd, new_extent, systemfiletable_get_filename(openfile_entry->systemtable_idx));
 
   return systemfiletable_ftruncate(openfile_entry->systemtable_idx, new_extent);
 }

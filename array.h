@@ -30,7 +30,7 @@ _kernel_oserror *array_ctor(array_t *this, const int entry_size);
 _kernel_oserror *array_alloc(array_t *table);
 void array_free(array_t *table);
 
-array_entry_base *array_alloc_entry(array_t *this);
+_kernel_oserror *array_alloc_entry(array_t *this, int *idx_ret);
 
 static inline void array_dtor(array_t *this)
 {

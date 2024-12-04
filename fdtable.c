@@ -86,6 +86,7 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
 
   int sysfiletbl_idx;
   err = systemfiletable_open_file(canon_name, flags, mode, &sysfiletbl_idx);
+  free(canon_name);
   if (err)
     goto error_return;
 
@@ -99,49 +100,33 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
   openfiletable_print();
 #endif
 
-  int i;
-  for (i = 0; i < fdtable->num_entries; i++)
-    if (array_get_entry_ptr(fdtable, i)->in_use == 0)
-      {
-	LOG("%s:   Found free entry at index %d", __func__, i);
-	break;
-      }
-
-  if (i == fdtable->num_entries)
-    {
-      LOG("%s:   No free entries (i=%d), extending array", __func__, i);
-      /* No free entries, increase array.  */
-      _kernel_oserror *err = array_alloc(fdtable);
-      if (err)
-	goto error_return;
-      i = (fdtable->num_entries == ARRAY_INIT_NUM_ENTRIES) ? 0 : fdtable->num_entries / 2;
-    }
-
-  free(canon_name);
-
-  LOG("%s:   Inserting entry at index %d", __func__, i);
   LOG("%s:     opentable index=%d", __func__, openfiletbl_idx);
 
-  fdtable_entry *entry = (fdtable_entry *)fdtable->entries;
+  if ((err = array_alloc_entry(fdtable, fd_ret)) == NULL)
+    {
+      fdtable_entry *entry = (fdtable_entry *)array_get_entry_ptr(fdtable, *fd_ret);
 
-  entry[i].base.in_use = 1;
-  entry[i].opentable_idx = openfiletbl_idx;
+      entry->opentable_idx = openfiletbl_idx;
 
-  *fd_ret = i + FDTABLE_BASE_FD;
+      (*fd_ret) += FDTABLE_BASE_FD;
 
-  LOG("%s:   returned fd=%d", __func__, *fd_ret);
+      LOG("%s:   returned fd=%d", __func__, *fd_ret);
 
 #if ENABLE_LOGGING
-  fdtable_print();
+      fdtable_print();
 #endif
 
-  return NULL;
+      return NULL;
+    }
+
+  /* Fall through on error.  */
 
 error_return:
   /* FIXME: tidy up any table entries allocated above that are no longer valid. */
-  LOG("%s: Error=%s", __func__, err->errmess);
-  if (canon_name)
-    free(canon_name);
+  if (err)
+    {
+      LOG("%s: Error=%s", __func__, err->errmess);
+    }
   *fd_ret = -1;
   return err;
 }
@@ -550,11 +535,11 @@ void fdtable_print(void)
   array_t *table = &app->fd_table;
   fdtable_entry *fdentry = (fdtable_entry *)table->entries;
 
-  printf("%-8s %s", "FD", "PATH");
+  printf("%-8s %s\n", "FD", "PATH");
   for (int i = 0; i < table->num_entries; i++)
     if (fdentry[i].base.in_use)
       {
 	openfiletable_entry *open_entry = openfiletable_get_entry(fdentry[i].opentable_idx);
-	printf("%-8d %s", i + FDTABLE_BASE_FD, systemfiletable_get_filename(open_entry->systemtable_idx));
+	printf("%-8d %s\n", i + FDTABLE_BASE_FD, systemfiletable_get_filename(open_entry->systemtable_idx));
       }
 }

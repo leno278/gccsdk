@@ -85,8 +85,10 @@ void array_free(array_t *table)
     }
 }
 
-array_entry_base *array_alloc_entry(array_t *this)
+_kernel_oserror *array_alloc_entry(array_t *this, int *idx_ret)
 {
+  *idx_ret = -1;
+
   int i;
   for (i = 0; i < this->num_entries; i++)
     if (array_get_entry_ptr(this, i)->in_use == 0)
@@ -101,12 +103,15 @@ array_entry_base *array_alloc_entry(array_t *this)
       /* No free entries, increase array.  */
       _kernel_oserror *err = array_alloc(this);
       if (err)
-	return NULL;
+	return err;
       i = (this->num_entries == ARRAY_INIT_NUM_ENTRIES) ? 0 : this->num_entries / 2;
     }
 
-  array_entry_base *entry = array_get_entry_ptr(this, i);
-  array_entry_mark_used(entry);
+  LOG("%s:   Inserting entry at index %d", __func__, i);
 
-  return entry;
+  array_entry_mark_used(array_get_entry_ptr(this, i));
+
+  *idx_ret = i;
+
+  return NULL;
 }

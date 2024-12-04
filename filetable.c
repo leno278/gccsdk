@@ -183,8 +183,6 @@ static _kernel_oserror *systemfiletable_add_entry(const char *canon_name, int fl
   int file_handle = 0;
   array_t *filetable = &global.system_filetable;
 
-  *idx_ret = -1;
-
   int type = file_object_type(canon_name);
   if (flags & O_CREAT)
     {
@@ -196,19 +194,21 @@ static _kernel_oserror *systemfiletable_add_entry(const char *canon_name, int fl
       else
 	{
 	  if (flags & O_EXCL)
-	    return armeabisupport_EEXIST;
-	  if (type == OBJECT_TYPE_DIR)
-	    return armeabisupport_EINVAL;
-	  err = osfile_open(canon_name, &file_handle);
+	    err = armeabisupport_EEXIST;
+	  else if (type == OBJECT_TYPE_DIR)
+	    err = armeabisupport_EINVAL;
+	  else
+	    err = osfile_open(canon_name, &file_handle);
 	}
     }
   else
     {
       if (type == OBJECT_TYPE_NOT_FOUND)
-	return armeabisupport_ENOENT;
-      if (type == OBJECT_TYPE_DIR)
-	return armeabisupport_EACCES;
-      err = osfile_open(canon_name, &file_handle);
+	err = armeabisupport_ENOENT;
+      else if (type == OBJECT_TYPE_DIR)
+	err = armeabisupport_EACCES;
+      else
+	err = osfile_open(canon_name, &file_handle);
     }
 
   if (err)
@@ -219,42 +219,24 @@ static _kernel_oserror *systemfiletable_add_entry(const char *canon_name, int fl
       goto error_return;
     }
 
-  int i;
-  for (i = 0; i < filetable->num_entries; i++)
-    if (array_get_entry_ptr(filetable, i)->in_use == 0)
-      {
-	LOG("%s:   Found free entry at index %d", __func__, i);
-	break;
-      }
-
-  if (i == filetable->num_entries)
+  if ((err = array_alloc_entry(filetable, idx_ret)) == NULL)
     {
-      LOG("%s:   No free entries (i=%d), extending array", __func__, i);
-      /* No free entries, increase array.  */
-      _kernel_oserror *err = array_alloc(filetable);
-      if (err)
-	goto error_return;
-      i = (filetable->num_entries == ARRAY_INIT_NUM_ENTRIES) ? 0 : filetable->num_entries / 2;
+      systemfiletable_entry *entry = (systemfiletable_entry *)array_get_entry_ptr(filetable, *idx_ret);
+
+      entry->filename = strdup(canon_name);
+      entry->ref_count = 1;
+      entry->file_handle = file_handle;
+
+      return NULL;
     }
-
-  LOG("%s:   Inserting entry at index %d", __func__, i);
-
-  systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
-
-  entry[i].base.in_use = 1;
-  entry[i].filename = strdup(canon_name);
-  entry[i].ref_count = 1;
-  entry[i].file_handle = file_handle;
-
-  *idx_ret = i;
-
-  return NULL;
 
 error_return:
   LOG("%s:   Error=%s", __func__, err->errmess);
 
   if (file_handle)
     osfile_close(file_handle);
+
+  *idx_ret = -1;
 
   return err;
 }
@@ -410,46 +392,25 @@ _kernel_oserror *openfiletable_add_entry(int systemtable_idx, int flags, int mod
 
   array_t *filetable = &global.open_filetable;
 
-  int i;
-  for (i = 0; i < filetable->num_entries; i++)
-    if (array_get_entry_ptr(filetable, i)->in_use == 0)
-      {
-	LOG("%s:   Found free entry at index %d", __func__, i);
-	break;
-      }
-
-  if (i == filetable->num_entries)
-    {
-      LOG("%s:   No free entries (i=%d), extending array", __func__, i);
-      /* No free entries, increase array.  */
-      _kernel_oserror *err = array_alloc(filetable);
-      if (err)
-	return err;
-      i = (filetable->num_entries == ARRAY_INIT_NUM_ENTRIES) ? 0 : filetable->num_entries / 2;
-    }
-
-  LOG("%s:   Inserting entry at index %d", __func__, i);
   LOG("%s:     systemtable index=%d", __func__, systemtable_idx);
 
-  openfiletable_entry *entry = (openfiletable_entry *)filetable->entries;
-
-  entry[i].base.in_use = 1;
-  entry[i].systemtable_idx = systemtable_idx;
-  entry[i].flags = flags;
-  entry[i].mode = mode;
-  entry[i].file_offset = 0;
-  entry[i].ref_count = 1;
-
   _kernel_oserror *err;
-  if ((err = filelocklist_ctor(&entry[i].locks)) != NULL)
+  if ((err = array_alloc_entry(filetable, idx_ret)) == NULL)
     {
-      LOG("%s:     err=%s", __func__, err->errmess);
-      return err;
+      openfiletable_entry *entry = (openfiletable_entry *)array_get_entry_ptr(filetable, *idx_ret);
+
+      entry->systemtable_idx = systemtable_idx;
+      entry->flags = flags;
+      entry->mode = mode;
+      entry->file_offset = 0;
+      entry->ref_count = 1;
+
+      if ((err = filelocklist_ctor(&entry->locks)) == NULL)
+	return NULL;
     }
 
-  *idx_ret = i;
-
-  return NULL;
+  LOG("%s:     err=%s", __func__, err->errmess);
+  return err;
 }
 
 _kernel_oserror *openfiletable_deref_entry(int openfiletable_idx)

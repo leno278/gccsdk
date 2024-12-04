@@ -216,17 +216,22 @@ static filelock *alloc_lock(app_object *app,
 			    off_t end,
 			    int type)
 {
-  filelock *lock = (filelock *)array_alloc_entry(&list->lock_allocator);
-  if (!lock)
-    return NULL;
+  int idx;
+  _kernel_oserror *err;
+  if ((err = array_alloc_entry(&list->lock_allocator, &idx)) == NULL)
+    {
+      filelock *lock = (filelock *)array_get_entry_ptr(&list->lock_allocator, idx);
 
-  lock->start = start;
-  lock->end = end;
-  lock->type = type;
-  lock->owner = app;
-  lock->openfiletable_idx = openfiletable_idx;
+      lock->start = start;
+      lock->end = end;
+      lock->type = type;
+      lock->owner = app;
+      lock->openfiletable_idx = openfiletable_idx;
 
-  return lock;
+      return lock;
+    }
+
+  return NULL;
 }
 
 /* There shall be at most one type of lock set for each byte in the file.

@@ -36,10 +36,13 @@ fdtable_entry *get_fdtable_entry(app_object *app, int fd)
   return &entry[fd - FDTABLE_BASE_FD];
 }
 
-static char *canonicalise_filename(const char *filename)
+static _kernel_oserror *canonicalise_filename(const char *filename, char **result)
 {
   _kernel_oserror *err;
   int buffer_size;
+
+  *result = NULL;
+
   err = _swix(OS_FSControl,
 	      _INR(0,5) | _OUT(5),
 	      0x25,		/*  in: r0=reason code - Canonicalise path */
@@ -50,10 +53,10 @@ static char *canonicalise_filename(const char *filename)
 	      0,		/*  in: r5=buffer size */
 	      &buffer_size);	/* out: r5=-ve buffer size */
   if (err)
-    return NULL;
+    return err;
   char *buffer = malloc(1 - buffer_size);
   if (!buffer)
-    return NULL;
+    return armeabisupport_ENOMEM;
 
   err = _swix(OS_FSControl,
 	      _INR(0,5),	/*  in: register range r0-r5 */
@@ -64,7 +67,12 @@ static char *canonicalise_filename(const char *filename)
 	      0,		/*  in: r4=ptr to string of paths or 0 */
 	      1 - buffer_size);	/*  in: r5=buffer size */
 
-  return err ? NULL : buffer;
+  if (err)
+    free(buffer);
+  else
+    *result = buffer;
+
+  return err;
 }
 
 _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *fd_ret)
@@ -72,25 +80,26 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
   TRACE("%s: file=%s", __func__, file);
   TRACE("%s:   flags=%X, mode=%X", __func__, flags, mode);
 
+  int sysfiletbl_idx = ARRAY_INVALID_INDEX;
+  int openfiletbl_idx = ARRAY_INVALID_INDEX;
   char *canon_name = NULL;
-  _kernel_oserror *err = NULL;
+  _kernel_oserror *err;
+
   app_object *app;
   if ((err = app_find(&app)) != NULL)
     goto error_return;
 
   array_t *fdtable = &app->fd_table;
 
-  canon_name = canonicalise_filename(file);
-  if (!canon_name)
+  err = canonicalise_filename(file, &canon_name);
+  if (err)
     goto error_return;
 
-  int sysfiletbl_idx;
   err = systemfiletable_open_file(canon_name, flags, mode, &sysfiletbl_idx);
   free(canon_name);
   if (err)
     goto error_return;
 
-  int openfiletbl_idx;
   err = openfiletable_add_entry(sysfiletbl_idx, flags, mode, &openfiletbl_idx);
   if (err)
     goto error_return;
@@ -122,12 +131,18 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
   /* Fall through on error.  */
 
 error_return:
-  /* FIXME: tidy up any table entries allocated above that are no longer valid. */
+  *fd_ret = -1;
+
+  if (sysfiletbl_idx != ARRAY_INVALID_INDEX)
+    array_entry_mark_unused(array_get_entry_ptr(&global.system_filetable, sysfiletbl_idx));
+  if (openfiletbl_idx != ARRAY_INVALID_INDEX)
+    array_entry_mark_unused(array_get_entry_ptr(&global.open_filetable, openfiletbl_idx));
+
   if (err)
     {
       LOG("%s: Error=%s", __func__, err->errmess);
     }
-  *fd_ret = -1;
+
   return err;
 }
 

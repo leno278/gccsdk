@@ -12,6 +12,7 @@
 #include <stdbool.h>
 
 #define ARRAY_INIT_NUM_ENTRIES 16
+#define ARRAY_INVALID_INDEX (-1)
 
 typedef struct _array_entry_base
 {

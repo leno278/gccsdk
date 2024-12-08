@@ -17,7 +17,6 @@
 #include "memory.h"
 #include "mmap.h"
 #include "shm.h"
-#include "filedesc.h"
 #include "fdtable.h"
 #include "array.h"
 #include "debug.h"
@@ -50,7 +49,13 @@ app_new(app_object **app_ret)
 
   linklist_add_to_end(&global.app_list, &app->link);
 
-  array_ctor(&app->fd_table, sizeof(fdtable_entry));
+  if (global.parent)
+    {
+      array_copy(&app->fd_table, &global.parent->fd_table);
+      global.parent = NULL;
+    }
+  else
+    array_ctor(&app->fd_table, sizeof(fdtable_entry));
 
   *app_ret = app;
 
@@ -118,10 +123,6 @@ armeabi_cleanup(void)
     }
 
   allocator_destroy_all(&app->allocator_list);
-
-  /* Do this before removing the mmaps as we use the mmap allocation to identify
-   * the shared memory object owner.  */
-  filedesc_cleanup_app(app);
 
   /* Remove all remaining mmap allocations for this app.  */
   mmap_cleanup_app(app);

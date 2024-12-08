@@ -12,8 +12,7 @@
 #include "stack.h"
 #include "types.h"
 #include "memory.h"
-#include "shm.h"
-#include "filedesc.h"
+#include "fdtable.h"
 #include "filetable.h"
 #include "lock.h"
 #include "debug.h"
@@ -27,6 +26,8 @@ command_info(void)
        app = linklist_next_app_object (app))
     {
       printf("App %X\n", app->ID);
+
+      fdtable_print(app);
 
       allocator_dump_all(&app->allocator_list);
 
@@ -44,12 +45,6 @@ command_info(void)
 
   printf("mmaps:\n");
   allocator_dump_all(&global.mmap_allocator_pool);
-
-  printf("SHM:\n");
-  shm_dump_object_list();
-
-  printf("FDs:\n");
-  filedesc_dump_fds();
 
   systemfiletable_print();
   openfiletable_print();

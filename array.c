@@ -87,7 +87,7 @@ void array_free(array_t *table)
 
 _kernel_oserror *array_alloc_entry(array_t *this, int *idx_ret)
 {
-  *idx_ret = -1;
+  *idx_ret = ARRAY_INVALID_INDEX;
 
   int i;
   for (i = 0; i < this->num_entries; i++)
@@ -112,6 +112,22 @@ _kernel_oserror *array_alloc_entry(array_t *this, int *idx_ret)
   array_entry_mark_used(array_get_entry_ptr(this, i));
 
   *idx_ret = i;
+
+  return NULL;
+}
+
+_kernel_oserror *array_copy(array_t *dst, array_t *src)
+{
+  if (!dst || !src)
+    return armeabisupport_EINVAL;
+
+  dst->entries = malloc(src->num_entries * src->entry_size);
+  if (!dst->entries)
+    return armeabisupport_ENOMEM;
+
+  memcpy(dst->entries, src->entries, src->num_entries * src->entry_size);
+  dst->num_entries = src->num_entries;
+  dst->entry_size = src->entry_size;
 
   return NULL;
 }

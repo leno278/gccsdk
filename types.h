@@ -85,8 +85,6 @@ typedef struct armeabisupport_globals
   link_list mmap_allocator_pool;
   link_list app_list;
   link_list allocator_list;
-  link_list fd_list;
-  unsigned next_fd;
   bool pre_filter_installed;
   bool post_filter_installed;
   bool aborttrap_enabled;
@@ -98,6 +96,11 @@ typedef struct armeabisupport_globals
 
   array_t open_filetable;
   array_t system_filetable;
+  array_t open_shmtable;
+  array_t system_shmtable;
+
+  app_object *parent;
+
 } armeabisupport_globals;
 
 typedef struct _armeabisupport_allocator armeabisupport_allocator;

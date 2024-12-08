@@ -7,11 +7,12 @@
 #include "armeabisupport.h"
 #include "fdtable.h"
 #include "filetable.h"
-#include "filedesc.h"
+#include "shmtable.h"
 #include "types.h"
 #include "main.h"
 #include <kernel.h>
 #include <stdlib.h>
+#include <string.h>
 #include <fcntl.h>
 #include <swis.h>
 #include <limits.h>
@@ -115,6 +116,7 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
     {
       fdtable_entry *entry = (fdtable_entry *)array_get_entry_ptr(fdtable, *fd_ret);
 
+      entry->type = fd_type_shared_file;
       entry->opentable_idx = openfiletbl_idx;
 
       (*fd_ret) += FDTABLE_BASE_FD;
@@ -122,7 +124,7 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
       LOG("%s:   returned fd=%d", __func__, *fd_ret);
 
 #if ENABLE_LOGGING
-      fdtable_print();
+      fdtable_print(app);
 #endif
 
       return NULL;
@@ -131,7 +133,7 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
   /* Fall through on error.  */
 
 error_return:
-  *fd_ret = -1;
+  *fd_ret = ARRAY_INVALID_INDEX;
 
   if (sysfiletbl_idx != ARRAY_INVALID_INDEX)
     array_entry_mark_unused(array_get_entry_ptr(&global.system_filetable, sysfiletbl_idx));
@@ -146,48 +148,47 @@ error_return:
   return err;
 }
 
-_kernel_oserror *fdtable_close_file(int fd)
+_kernel_oserror *fdtable_close(app_object *app, fdtable_entry *fd)
 {
   _kernel_oserror *err;
-  app_object *app;
-  if ((err = app_find(&app)) != NULL)
-    return err;
-
-  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
-  if (!fd_entry || fd_entry->base.in_use == 0)
-    return armeabisupport_EBADF;
 
   TRACE("%s: fd=%d", __func__, fd);
 
-  /* IEEE Std 1003.1-1988 (“POSIX.1”) requires that all locks associated
-   * with a file for a given process are removed when any file descriptor for
-   * that file is closed by that process.
-   */
-  filelocklist_clear_locks(app, fd_entry->opentable_idx);
-  openfiletable_deref_entry(fd_entry->opentable_idx);
-
-  fd_entry->base.in_use = 0;
-
-  return NULL;
-}
-
-_kernel_oserror *fdtable_lseek(int fd, off_t offset, int whence, off_t *offset_ret)
-{
-  _kernel_oserror *err = NULL;
-  app_object *app;
-  if ((err = app_find(&app)) != NULL)
-    return err;
-
-  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
-  if (!fd_entry)
+  switch (fd->type)
     {
-      *offset_ret = (off_t)-1;
-      return armeabisupport_EBADF;
+    case fd_type_shared_file:
+      /* IEEE Std 1003.1-1988 (“POSIX.1”) requires that all locks associated
+       * with a file for a given process are removed when any file descriptor for
+       * that file is closed by that process.
+       */
+      filelocklist_clear_locks(app, fd->opentable_idx);
+      err = openfiletable_deref_entry(fd->opentable_idx);
+      break;
+    case fd_type_shm:
+      err = openshmtable_deref_entry(fd->opentable_idx);
+      break;
+    default:
+      err = armeabisupport_EBADF;
+      break;
     }
 
-  TRACE("%s: fd=%d, offset=%ld, whence=%d", __func__, fd, offset, whence);
+  array_entry_mark_unused(&fd->base);
 
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
+  return err;
+}
+
+_kernel_oserror *fdtable_lseek(fdtable_entry *fd,
+			       off_t offset,
+			       int whence,
+			       off_t *offset_ret)
+{
+  _kernel_oserror *err = NULL;
+
+
+  if (fd->type != fd_type_shared_file)
+    return armeabisupport_EINVAL;
+
+  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
   off_t new_offset = (off_t)-1;
 
   switch (whence)
@@ -229,37 +230,34 @@ _kernel_oserror *fdtable_lseek(int fd, off_t offset, int whence, off_t *offset_r
       break;
     }
 
-  *offset_ret = openfile_entry->file_offset = new_offset;
-
   if (new_offset < 0)
     err = armeabisupport_EINVAL;
 
   if (err)
-    LOG("%s: Error: %s", __func__, err->errmess);
+    {
+      *offset_ret = (off_t)-1;
+      LOG("%s: Error: %s", __func__, err->errmess);
+    }
+  else
+    *offset_ret = openfile_entry->file_offset = new_offset;
 
   return err;
 }
 
-_kernel_oserror *fdtable_read(int fd, void *buf, size_t count, int *bytes_read)
+_kernel_oserror *fdtable_read(fdtable_entry *fd,
+			      void *buf,
+			      size_t count,
+			      int *bytes_read)
 {
-  *bytes_read = 0;
+  if (fd->type != fd_type_shared_file)
+    return armeabisupport_EINVAL;
 
-  _kernel_oserror *err;
-  app_object *app;
-  if ((err = app_find(&app)) != NULL)
-    return err;
-
-  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
-  if (!fd_entry)
-    return armeabisupport_EBADF;
-
-  TRACE("%s: fd=%d, buf=%p, count=%ld", __func__, fd, buf, count);
-
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
+  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
 
   if ((openfile_entry->flags & O_ACCMODE) == O_WRONLY)
       return armeabisupport_EBADF;
 
+  _kernel_oserror *err;
   off_t file_length;
   if ((err = systemfiletable_get_file_length(openfile_entry->systemtable_idx, &file_length)) != NULL)
     return armeabisupport_EINVAL;
@@ -284,22 +282,15 @@ _kernel_oserror *fdtable_read(int fd, void *buf, size_t count, int *bytes_read)
   return err;
 }
 
-_kernel_oserror *fdtable_write(int fd, void *buf, size_t count, int *bytes_written)
+_kernel_oserror *fdtable_write(fdtable_entry *fd,
+			       void *buf,
+			       size_t count,
+			       int *bytes_written)
 {
-  *bytes_written = 0;
+  if (fd->type != fd_type_shared_file)
+    return armeabisupport_EINVAL;
 
-  _kernel_oserror *err;
-  app_object *app;
-  if ((err = app_find(&app)) != NULL)
-    return err;
-
-  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
-  if (!fd_entry)
-    return armeabisupport_EBADF;
-
-  TRACE("%s: fd=%d, buf=%p, count=%ld", __func__, fd, buf, count);
-
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
+  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
 
   if ((openfile_entry->flags & O_ACCMODE) == O_RDONLY)
     {
@@ -307,6 +298,7 @@ _kernel_oserror *fdtable_write(int fd, void *buf, size_t count, int *bytes_writt
       return armeabisupport_EBADF;
     }
 
+  _kernel_oserror *err;
   int bytes_not_written;
   if (openfile_entry->flags & O_APPEND)
     {
@@ -333,7 +325,7 @@ _kernel_oserror *fdtable_write(int fd, void *buf, size_t count, int *bytes_writt
 }
 
 _kernel_oserror *
-fdtable_get_info(int fd,
+fdtable_get_info(fdtable_entry *fd,
 		 int *type,
 		 const char **name,
 		 void **load,
@@ -341,16 +333,10 @@ fdtable_get_info(int fd,
 		 off_t *length,
 		 unsigned *attributes)
 {
-  _kernel_oserror *err;
-  app_object *app;
-  if ((err = app_find(&app)) != NULL)
-    return err;
+  if (fd->type != fd_type_shared_file)
+    return armeabisupport_EINVAL;
 
-  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
-  if (!fd_entry)
-    return armeabisupport_EBADF;
-
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
+  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
   if (!openfile_entry)
     return armeabisupport_EBADF;
 
@@ -418,21 +404,18 @@ get_start_end_offsets(openfiletable_entry *openfile_entry,
 }
 
 _kernel_oserror *
-fdtable_get_lock(int fd, int *type, int *whence, off_t *offset, off_t *len)
+fdtable_get_lock(fdtable_entry *fd,
+		 int *type,
+		 int *whence,
+		 off_t *offset,
+		 off_t *len)
 {
-  app_object *app;
-  if (app_find(&app) != NULL)
+  if (fd->type != fd_type_shared_file)
     return armeabisupport_EINVAL;
 
-  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
-  if (!fd_entry)
-    return armeabisupport_EBADF;
-
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
+  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
   if (!openfile_entry)
     return armeabisupport_EBADF;
-
-  TRACE("%s: fd=%d, type=%d, whence=%d, offset=%ld, len=%ld", __func__, fd, *type, *whence, *offset, *len);
 
   _kernel_oserror *err;
   off_t start, end;
@@ -440,7 +423,7 @@ fdtable_get_lock(int fd, int *type, int *whence, off_t *offset, off_t *len)
     return err;
 
   if (filelocklist_get_lock(&openfile_entry->locks,
-			    fd_entry->opentable_idx,
+			    fd->opentable_idx,
 			    &start,
 			    &end,
 			    type))
@@ -456,21 +439,19 @@ fdtable_get_lock(int fd, int *type, int *whence, off_t *offset, off_t *len)
 }
 
 _kernel_oserror *
-fdtable_set_lock(int fd, int *type, int *whence, off_t *offset, off_t *len)
+fdtable_set_lock(app_object *app,
+		 fdtable_entry *fd,
+		 int *type,
+		 int *whence,
+		 off_t *offset,
+		 off_t *len)
 {
-  app_object *app;
-  if (app_find(&app) != NULL)
+  if (fd->type != fd_type_shared_file)
     return armeabisupport_EINVAL;
 
-  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
-  if (!fd_entry)
-    return armeabisupport_EBADF;
-
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
+  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
   if (!openfile_entry)
     return armeabisupport_EBADF;
-
-  TRACE("%s: fd=%d, type=%d, whence=%d, offset=%ld, len=%ld", __func__, fd, *type, *whence, *offset, *len);
 
   _kernel_oserror *err;
   off_t start, end;
@@ -479,82 +460,235 @@ fdtable_set_lock(int fd, int *type, int *whence, off_t *offset, off_t *len)
 
   return *type == F_UNLCK
 	? filelocklist_remove_lock(app,
-				   fd_entry->opentable_idx,
+				   fd->opentable_idx,
 				   start,
 				   end)
 	: filelocklist_add_lock(app,
-				fd_entry->opentable_idx,
+				fd->opentable_idx,
 				start,
 				end,
 				*type);
 }
 
-_kernel_oserror *fdtable_fsync(int fd)
+_kernel_oserror *fdtable_fsync(fdtable_entry *fd)
 {
-  app_object *app;
-  if (app_find(&app) != NULL)
+  if (fd->type != fd_type_shared_file)
     return armeabisupport_EINVAL;
 
-  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
-  if (!fd_entry)
-    return armeabisupport_EBADF;
-
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
+  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
   if (!openfile_entry)
     return armeabisupport_EBADF;
-
-  TRACE("%s: fd=%d", __func__, fd);
 
   return systemfiletable_fsync(openfile_entry->systemtable_idx);
 }
 
-_kernel_oserror *fdtable_ftruncate(int fd, off_t new_extent)
+_kernel_oserror *fdtable_ftruncate(fdtable_entry *fd, off_t new_extent)
 {
-  app_object *app;
-  if (app_find(&app) != NULL)
-    return armeabisupport_EINVAL;
-
-  if (filedesc_find_fd(fd) != NULL)
-    {
+  _kernel_oserror *err;
+  switch (fd->type)
+  {
+    case fd_type_shared_file: {
+      openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
+      err = openfile_entry
+	    ? systemfiletable_ftruncate(openfile_entry->systemtable_idx, new_extent)
+	    : armeabisupport_EBADF;
+      break;
+    }
+    case fd_type_shm:
       /* This is a shared memory object which is currently a no-op for ftruncate.  */
+      err = NULL;
+      break;
+    default:
+      err = armeabisupport_EBADF;
+      break;
+  }
+
+  return err;
+}
+
+_kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd_ret)
+{
+  _kernel_oserror *err;
+  int sysshmtbl_idx = ARRAY_INVALID_INDEX;
+  int openshmtbl_idx = ARRAY_INVALID_INDEX;
+
+  if (strlen(name) > PATH_MAX)
+    {
+      LOG("shm_open: \"%s\" name too long", name);
+      return armeabisupport_ENAMETOOLONG;
+    }
+
+  app_object *app;
+  if ((err = app_find(&app)) != NULL)
+    return err;
+
+  bool exists = systemshmtable_shm_exists(name) == ARRAY_INVALID_INDEX;
+
+  /* Fail if O_CREAT is not set and the named shared memory object does not exist.  */
+  if (!exists && !(oflag & O_CREAT))
+    {
+      LOG("shm_open: \"%s\" does not exist and O_CREATE not set", name);
+      return armeabisupport_ENOENT;
+    }
+
+  /* Fail if O_CREAT and O_EXCL are set and the named shared memory object already exists.  */
+  if (exists && ((oflag & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)))
+    {
+      LOG("shm_open: \"%s\" already exists, but O_CREAT and O_EXCL are set", name);
+      return armeabisupport_EEXIST;
+    }
+
+  err = systemshmtable_open_shm(name, oflag, mode, &sysshmtbl_idx);
+  if (err)
+    return err;
+
+  err = openshmtable_add_entry(sysshmtbl_idx, oflag, mode, &openshmtbl_idx);
+  if (err)
+    {
+      array_entry_mark_unused(array_get_entry_ptr(&global.system_shmtable, sysshmtbl_idx));
+      return err;
+    }
+
+  LOG("%s:     openshmtable index=%d", __func__, openshmtbl_idx);
+
+  array_t *fd_table = &app->fd_table;
+
+  if ((err = array_alloc_entry(fd_table, fd_ret)) == NULL)
+    {
+      fdtable_entry *entry = (fdtable_entry *)array_get_entry_ptr(fd_table, *fd_ret);
+
+      entry->type = fd_type_shm;
+      entry->opentable_idx = openshmtbl_idx;
+
+      (*fd_ret) += FDTABLE_BASE_FD;
+
+      LOG("%s:   returned fd=%d", __func__, *fd_ret);
+
+#if ENABLE_LOGGING
+      fdtable_print(app);
+#endif
+
       return NULL;
     }
 
-  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
-  if (!fd_entry)
-    return armeabisupport_EBADF;
+  *fd_ret = ARRAY_INVALID_INDEX;
 
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd_entry->opentable_idx);
-  if (!openfile_entry)
-    return armeabisupport_EBADF;
+  if (sysshmtbl_idx != ARRAY_INVALID_INDEX)
+    array_entry_mark_unused(array_get_entry_ptr(&global.system_shmtable, sysshmtbl_idx));
+  if (openshmtbl_idx != ARRAY_INVALID_INDEX)
+    array_entry_mark_unused(array_get_entry_ptr(&global.open_shmtable, openshmtbl_idx));
 
-  TRACE("%s: fd=%d, new_extent=%ld, path=%s",
-	__func__, fd, new_extent, systemfiletable_get_filename(openfile_entry->systemtable_idx));
+  if (err)
+    {
+      LOG("%s: Error=%s", __func__, err->errmess);
+    }
 
-  return systemfiletable_ftruncate(openfile_entry->systemtable_idx, new_extent);
+  return err;
+}
+
+_kernel_oserror *fdtable_dup(fdtable_entry *fd, int *new_fd_ret)
+{
+  _kernel_oserror *err;
+  app_object *app;
+  if ((err = app_find(&app)) != NULL)
+    return err;
+
+  /* dup() is the only time that the opentable ref is ever incremented, open() creates
+   * a new entry rather than increasing the ref.  */
+  switch (fd->type)
+  {
+    case fd_type_shared_file: {
+      openfiletable_entry *openfile_entry =
+		(openfiletable_entry *)array_get_entry_ptr(&global.open_filetable,
+							   fd->opentable_idx);
+      openfile_entry->ref_count++;
+      break;
+    }
+    case fd_type_shm: {
+      openshmtable_entry *openshm_entry =
+		(openshmtable_entry *)array_get_entry_ptr(&global.open_shmtable,
+							  fd->opentable_idx);
+      openshm_entry->ref_count++;
+      break;
+    }
+    default:
+      return armeabisupport_EBADF;
+  }
+
+  if ((err = array_alloc_entry(&app->fd_table, new_fd_ret)) != NULL)
+    return err;
+
+  fdtable_entry *new_entry = (fdtable_entry *)array_get_entry_ptr(&app->fd_table,
+								  *new_fd_ret);
+  new_entry->type = fd->type;
+  new_entry->opentable_idx = fd->opentable_idx;
+
+  (*new_fd_ret) += FDTABLE_BASE_FD;
+
+  LOG("%s: fd %d duplicated as fd %d",
+      __func__,
+      array_get_entry_idx(&app->fd_table, fd),
+      *new_fd_ret);
+
+  return NULL;
 }
 
 void fdtable_destroy(array_t *table)
 {
   fdtable_entry *fd_entry = (fdtable_entry *)table->entries;
   for (int i = 0; i < table->num_entries; i++)
-    if (fd_entry[i].base.in_use)
-      openfiletable_deref_entry(fd_entry[i].opentable_idx);
+    if (array_entry_is_in_use(&fd_entry[i].base))
+      {
+	switch (fd_entry[i].type)
+	{
+	  case fd_type_shared_file:
+	    openfiletable_deref_entry(fd_entry[i].opentable_idx);
+	    break;
+	  case fd_type_shm:
+	    openshmtable_deref_entry(fd_entry[i].opentable_idx);
+	    break;
+	  default:
+	    break;
+	}
+      }
 }
 
-void fdtable_print(void)
+void fdtable_print(app_object *app)
 {
-  app_object *app;
-  if ((app_find(&app)) != NULL)
-    return;
   array_t *table = &app->fd_table;
-  fdtable_entry *fdentry = (fdtable_entry *)table->entries;
+  fdtable_entry *fd = (fdtable_entry *)table->entries;
 
-  printf("%-8s %s\n", "FD", "PATH");
+  printf("%-8s %-10s %s\n", "FD", "TYPE", "PATH");
   for (int i = 0; i < table->num_entries; i++)
-    if (fdentry[i].base.in_use)
+    if (array_entry_is_in_use(&fd[i].base))
       {
-	openfiletable_entry *open_entry = openfiletable_get_entry(fdentry[i].opentable_idx);
-	printf("%-8d %s\n", i + FDTABLE_BASE_FD, systemfiletable_get_filename(open_entry->systemtable_idx));
+	switch (fd->type)
+	{
+	  case fd_type_shared_file: {
+	    openfiletable_entry *open_entry =
+			(openfiletable_entry *)array_get_entry_ptr(&global.open_filetable,
+								   fd[i].opentable_idx);
+	    printf("%-8d %-10s %s\n",
+		   i + FDTABLE_BASE_FD,
+		   "FILE",
+		   systemfiletable_get_filename(open_entry->systemtable_idx));
+	    break;
+	  }
+	  case fd_type_shm: {
+	    openshmtable_entry *open_entry =
+			(openshmtable_entry *)array_get_entry_ptr(&global.open_shmtable,
+								  fd[i].opentable_idx);
+	    printf("%-8d %-10s %s\n",
+		   i + FDTABLE_BASE_FD,
+		   "SHM",
+		   systemshmtable_get_name(open_entry->systemtable_idx));
+	    break;
+	  }
+	  case fd_type_invalid:
+	    printf("%-8d %s\n",
+		   i + FDTABLE_BASE_FD,
+		   "INVALID");
+	    break;
+	}
       }
 }

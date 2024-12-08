@@ -12,7 +12,7 @@
 #include "swi.h"
 #include "abort.h"
 #include "memory.h"
-#include "filedesc.h"
+#include "shmtable.h"
 #include "filetable.h"
 #include "mmap.h"
 
@@ -89,9 +89,11 @@ _kernel_oserror *module_initialise (const char *tail, int podule_base, void *pw)
 
   memset (&global, 0, sizeof (armeabisupport_globals));
 
-  filedesc_initialise(&global);
   array_ctor(&global.system_filetable, sizeof(systemfiletable_entry));
+  array_ctor(&global.system_shmtable, sizeof(systemshmtable_entry));
   array_ctor(&global.open_filetable, sizeof(openfiletable_entry));
+  array_ctor(&global.open_shmtable, sizeof(openshmtable_entry));
+
 
   // linklist_init_list (&global.app_list);
   // global.flags.no_client_check = false;
@@ -157,7 +159,9 @@ _kernel_oserror *module_finalisation (int fatal, int podule_base, void *pw)
 	filelocklist_dtor(&entry->locks);
       }
 
+  array_dtor(&global.open_shmtable);
   array_dtor(&global.open_filetable);
+  array_dtor(&global.system_shmtable);
   array_dtor(&global.system_filetable);
 
   remove_pre_filter();

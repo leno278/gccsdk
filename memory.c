@@ -9,7 +9,9 @@
 #include "memory.h"
 #include "mmap.h"
 #include "shm.h"
-#include "filedesc.h"
+#include "fdop.h"
+#include "fdtable.h"
+#include "shmtable.h"
 #include "swi.h"
 #include "types.h"
 
@@ -20,27 +22,13 @@
 #include <stdbool.h>
 #include <sys/mman.h>
 
-#define DEBUG_PRINT 0
-#define DEBUG_REPORT 1
-#define DEBUG_REPORT_SWI_ERROR 1
-
 #include "debug.h"
 
-#define LOGGING 0
-#define TRACING 0
+#define ENABLE_LOGGING 0
+#include "log.h"
 
-#if LOGGING
-#define LOG(format,...) do { reporter_printf(format, ##__VA_ARGS__); } while(0)
-#else
-#define LOG(format,...)
-#endif
-
-#undef TRACE
-#if TRACING
-#define TRACE(format,...) do { reporter_printf(format, ##__VA_ARGS__); } while(0)
-#else
-#define TRACE(format,...)
-#endif
+#define ENABLE_TRACING 0
+#include "trace.h"
 
 #define DECLARE_VT(name) \
 static size_t _vt_##name##_size(void); \
@@ -1239,18 +1227,35 @@ allocator_munmap (armeabisupport_allocator_mmap *allocator,
         {
 	  if (page == current->start_page && page_count == current->end_page - current->start_page)
 	    {
+	      _kernel_oserror *err;
+	      app_object *app;
+	      if ((err = app_find(&app)) != NULL)
+		return err;
+
+	      fdtable_entry *fd;
+	      if ((fd = get_fdtable_entry(app, current->fd)) == NULL
+		  || !array_entry_is_in_use(&fd->base))
+		return armeabisupport_EBADF;
+
 	      /* Freeing whole block. Does it match a shared memory object? */
-	      filedesc *obj = filedesc_find_fd(current->fd);
-	      if (obj)
+	      if (fd->type == fd_type_shm)
 		{
+#if ENABLE_LOGGING
+		  openshmtable_entry *openshm_entry =
+				(openshmtable_entry *)array_get_entry_ptr(&global.open_shmtable,
+									  fd-opentable_idx);
+		  systemshmtable_entry *systemshm_entry =
+				(systemshmtable_entry *)array_get_entry_ptr(&global.system_shmtable,
+									    openshm_entry->systemtable_idx);
 		  TRACE_SHM("allocator_munmap: shared memory object %p, \"%s\", fd=%d, addr=%p, len=%d, ref=%d",
-			    obj->shm,
-			    obj->shm->name,
-			    obj->value,
-			    page_to_addr(&obj->shm->allocator->base, obj->shm->block->start_page),
-			    pages_to_bytes(obj->shm->block->end_page - obj->shm->block->start_page),
-			    obj->shm->ref_count);
-		  shm_deref_object(obj->shm);
+			    systemshm_entry,
+			    systemshm_entry->name,
+			    current->fd,
+			    page_to_addr(&systemshm_entry->allocator->base, systemshm_entry->block->start_page),
+			    pages_to_bytes(systemshm_entry->block->end_page - systemshm_entry->block->start_page),
+			    systemshm_entry->ref_count);
+#endif
+		  openshmtable_deref_entry(fd->opentable_idx);
 		  return NULL;
 		}
 
@@ -1488,7 +1493,7 @@ allocator_mmap_cleanup_app(armeabisupport_allocator_mmap *allocator,
     {
       mmap_block *next = linklist_next_mmap_block (block);
       /* Don't clean up shared memory blocks as they may still be in use elsewhere.  */
-      filedesc *fd = filedesc_find_fd(block->fd);
+/*      filedesc *fd = filedesc_find_fd(block->fd);
 
       if (fd)
 	TRACE("allocator_mmap_cleanup_app: app=0x%X, block owner=0x%X, block=0x%X, fd=%d, shm=%p, ref=%d",
@@ -1499,7 +1504,7 @@ allocator_mmap_cleanup_app(armeabisupport_allocator_mmap *allocator,
 	TRACE("allocator_mmap_cleanup_app: app=0x%X, block owner=0x%X, block=0x%X, fd=%d",
 		    app, block->owner,
 		    page_to_addr(&allocator->base,block->start_page),
-		    block->fd);
+		    block->fd);*/
 
       if (block->owner == app)
 	{

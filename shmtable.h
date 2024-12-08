@@ -1,0 +1,57 @@
+/* shmtable.h
+ *
+ * Copyright 2024 GCCSDK Developers
+ * Written by Lee Noar
+ */
+
+#ifndef SHMTABLE_H
+#define SHMTABLE_H
+
+#include "array.h"
+#include "types.h"
+#include <swi.h>
+
+typedef struct _openshmtable_entry
+{
+  array_entry_base base;
+
+  int systemtable_idx;
+  int ref_count;
+  int flags;
+  int mode;
+
+} openshmtable_entry;
+
+_kernel_oserror *openshmtable_add_entry(int systemtable_idx, int flags, int mode, int *idx_ret);
+_kernel_oserror *openshmtable_deref_entry(int opentable_idx);
+
+typedef struct _systemshmtable_entry
+{
+  array_entry_base base;
+
+  armeabisupport_allocator_mmap *allocator;
+  mmap_block *block;
+
+  int ref_count;
+  bool linked;
+
+  char *name;
+
+} systemshmtable_entry;
+
+_kernel_oserror *systemshmtable_open_shm(const char *name, int flags, int mode, int *);
+_kernel_oserror *systemshmtable_close_shm(int systemtable_idx);
+
+/* Return the index of the entry if it exists, otherwise ARRAY_INVALID_INDEX.  */
+int systemshmtable_shm_exists(const char *name);
+
+static inline const char *
+systemshmtable_get_name(int systemtable_idx)
+{
+  array_t *system_shmtable = &global.system_shmtable;
+  systemshmtable_entry *entry = (systemshmtable_entry *)array_get_entry_ptr(system_shmtable,
+									    systemtable_idx);
+  return entry->name;
+}
+
+#endif

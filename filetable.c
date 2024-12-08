@@ -70,7 +70,7 @@ static int filetable_scan_for_canon_filename(const char *canon_filename)
     if (strcmp(entry[i].filename, canon_filename) == 0)
       return i;
 
-  return -1;
+  return ARRAY_INVALID_INDEX;
 }
 
 static _kernel_oserror *osfile_create(const char *canon_filename, int *handle)
@@ -236,7 +236,7 @@ error_return:
   if (file_handle)
     osfile_close(file_handle);
 
-  *idx_ret = -1;
+  *idx_ret = ARRAY_INVALID_INDEX;
 
   return err;
 }
@@ -247,7 +247,7 @@ _kernel_oserror *systemfiletable_open_file(const char *canon_name, int flags, in
 
   _kernel_oserror *err = NULL;
   int entry_idx = filetable_scan_for_canon_filename(canon_name);
-  if (entry_idx != -1)
+  if (entry_idx != ARRAY_INVALID_INDEX)
     {
       array_t *filetable = &global.system_filetable;
       systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
@@ -416,14 +416,15 @@ _kernel_oserror *openfiletable_add_entry(int systemtable_idx, int flags, int mod
 _kernel_oserror *openfiletable_deref_entry(int openfiletable_idx)
 {
   TRACE("%s: openfiletable_idx=%d", __func__, openfiletable_idx);
+  _kernel_oserror *err = NULL;
 
   openfiletable_entry *openfile_entry = openfiletable_get_entry(openfiletable_idx);
   openfile_entry->ref_count--;
   LOG("%s:   new ref_count = %d, close file", __func__, openfile_entry->ref_count);
   if (openfile_entry->ref_count == 0)
     {
-      systemfiletable_close_file(openfile_entry->systemtable_idx);
-      openfile_entry->base.in_use = 0;
+      err = systemfiletable_close_file(openfile_entry->systemtable_idx);
+      array_entry_mark_unused(&openfile_entry->base);
     }
 
 #if ENABLE_LOGGING
@@ -431,7 +432,7 @@ _kernel_oserror *openfiletable_deref_entry(int openfiletable_idx)
   openfiletable_print();
 #endif
 
-  return NULL;
+  return err;
 }
 
 void openfiletable_print(void)

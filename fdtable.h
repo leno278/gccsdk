@@ -11,9 +11,19 @@
 #include "types.h"
 #include <unistd.h>
 
+typedef enum fd_type
+{
+  fd_type_invalid,
+  fd_type_shm,
+  fd_type_shared_file
+
+} fd_type;
+
 typedef struct _fdtable_entry
 {
   array_entry_base base;
+
+  fd_type type;
 
   int opentable_idx;
 
@@ -22,13 +32,14 @@ typedef struct _fdtable_entry
 fdtable_entry *get_fdtable_entry(app_object *app, int fd);
 void fdtable_destroy(array_t *);
 _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *fd_ret);
-_kernel_oserror *fdtable_close_file(int fd);
-_kernel_oserror *fdtable_lseek(int fd, off_t offset, int whence, off_t *offset_ret);
-_kernel_oserror *fdtable_read(int fd, void *buf, size_t count, int *bytes_read);
-_kernel_oserror *fdtable_write(int fd, void *buf, size_t count, int *bytes_written);
+_kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd_ret);
+_kernel_oserror *fdtable_close(app_object *app, fdtable_entry *fd);
+_kernel_oserror *fdtable_lseek(fdtable_entry *fd, off_t offset, int whence, off_t *offset_ret);
+_kernel_oserror *fdtable_read(fdtable_entry *fd, void *buf, size_t count, int *bytes_read);
+_kernel_oserror *fdtable_write(fdtable_entry *fd, void *buf, size_t count, int *bytes_written);
 
 _kernel_oserror *
-fdtable_get_info(int fd,
+fdtable_get_info(fdtable_entry *fd,
 		 int *type,
 		 const char **name,
 		 void **load,
@@ -37,12 +48,13 @@ fdtable_get_info(int fd,
 		 unsigned *attributes);
 
 _kernel_oserror *
-fdtable_get_lock(int fd, int *type, int *whence, off_t *start, off_t *len);
+fdtable_get_lock(fdtable_entry *fd, int *type, int *whence, off_t *start, off_t *len);
 _kernel_oserror *
-fdtable_set_lock(int fd, int *type, int *whence, off_t *start, off_t *len);
-_kernel_oserror *fdtable_fsync(int fd);
-_kernel_oserror *fdtable_ftruncate(int fd, off_t new_extent);
+fdtable_set_lock(app_object *app, fdtable_entry *fd, int *type, int *whence, off_t *start, off_t *len);
+_kernel_oserror *fdtable_fsync(fdtable_entry *fd);
+_kernel_oserror *fdtable_ftruncate(fdtable_entry *fd, off_t new_extent);
+_kernel_oserror *fdtable_dup(fdtable_entry *fd, int *new_fd_ret);
 
-void fdtable_print(void);
+void fdtable_print(app_object *app);
 
 #endif

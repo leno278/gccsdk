@@ -12,8 +12,9 @@
 #include "mmap.h"
 #include "shm.h"
 #include "fileop.h"
-#include "filedesc.h"
+#include "fdop.h"
 #include "main.h"
+#include "types.h"
 
 #define DEBUG_PRINT 1
 #define DEBUG_REPORT 1
@@ -50,6 +51,14 @@ module_swihandler (int number, _kernel_swi_regs * r, void *pw)
     case ARMEABISupport_FileOp - ARMEABISupport_00:
       err = file_op(r);
       break;
+    case ARMEABISupport_SetAsParent - ARMEABISupport_00: {
+      _kernel_oserror *err;
+      app_object *app;
+      if ((err = app_find(&app)) != NULL)
+	return err;
+      global.parent = app;
+      break;
+    }
     default:
       err = error_BAD_SWI;
       break;

@@ -25,6 +25,7 @@
 #define FDOP_FSYNC		8
 #define FDOP_FTRUNCATE		9
 #define FDOP_DUP		10
+#define FDOP_DUP2		11
 
 #define ENABLE_LOGGING 0
 #include "log.h"
@@ -105,8 +106,14 @@
  *	  Entry:
  *	    r1 = fd
  *	  Exit:
- *	    r0 = new handle (will not be the lowest fd in current process) if success (V flag
+ *	    r0 = new FD (will not be the lowest fd in current process) if success (V flag
  *			     clear) or error pointer (V flag set).
+ *     11 - dup2
+ *	  Entry:
+ *	    r1 = source FD
+ *	    r2 = destination FD
+ *	  Exit:
+ *	    r0 = new FD if successful (V flag clear) or error pointer (V flag set).
 */
 
 _kernel_oserror *
@@ -218,6 +225,14 @@ fd_op(_kernel_swi_regs *r)
 	  __func__,
 	  r->r[1]);
     err = fdtable_dup(fd, &r->r[0]);
+    break;
+  case FDOP_DUP2:
+    TRACE("%s:FDOP_DUP2: old fd=%d, new fd=%d",
+	  __func__,
+	  r->r[1],
+	  r->r[2]);
+    if ((err = fdtable_dup2(fd, r->r[2])) == NULL)
+      r->r[0] = r->r[2];
     break;
   default:
     err = armeabisupport_bad_reason;

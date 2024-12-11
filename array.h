@@ -28,7 +28,8 @@ typedef struct _array_t
 
 _kernel_oserror *array_ctor(array_t *this, const int entry_size);
 
-_kernel_oserror *array_alloc(array_t *table);
+/* If idx_N is not -ve, then ensure that that entry exists.  */
+_kernel_oserror *array_alloc(array_t *table, int idx_N);
 void array_free(array_t *table);
 
 _kernel_oserror *array_alloc_entry(array_t *this, int *idx_ret);

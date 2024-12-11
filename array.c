@@ -29,7 +29,23 @@ _kernel_oserror *array_ctor(array_t *this, const int entry_size)
   return NULL;
 }
 
-_kernel_oserror *array_alloc(array_t *table)
+static inline unsigned int next_power_of_2(unsigned int v)
+{
+  v--;
+  v |= v >> 1;
+  v |= v >> 2;
+  v |= v >> 4;
+  v |= v >> 8;
+  v |= v >> 16;
+  v++;
+  v += (v == 0);
+
+  return v;
+}
+
+/* (Re)allocate the table to include include_idx_N or to twice the current size
+ * if include_idx_N is -ve.  */
+_kernel_oserror *array_alloc(array_t *table, int include_idx_N)
 {
   TRACE("%s: table=%p", __func__, table);
   int new_size;
@@ -41,9 +57,15 @@ _kernel_oserror *array_alloc(array_t *table)
   if (!table)
     return armeabisupport_EINVAL;
 
+  if (include_idx_N < table->num_entries)
+    return NULL; /* Array already includes the required index.  */
+
+  if (include_idx_N >= 0)
+    include_idx_N = next_power_of_2(include_idx_N);
+
   if (!table->entries)
     {
-      new_size = ARRAY_INIT_NUM_ENTRIES;
+      new_size = (include_idx_N < 0) ? ARRAY_INIT_NUM_ENTRIES : include_idx_N;
       new_table = malloc(new_size * table->entry_size);
       LOG("%s: creating array of %d elements (%d bytes)",
 	  __func__, new_size, new_size * table->entry_size);
@@ -55,7 +77,7 @@ _kernel_oserror *array_alloc(array_t *table)
     }
   else
     {
-      new_size = table->num_entries * 2;
+      new_size = (include_idx_N < 0) ? table->num_entries * 2 : include_idx_N;
       LOG("%s: resizing array from %d to %d elements (%d bytes)", __func__,
 	  table->num_entries, new_size, new_size * table->entry_size);
       new_table = realloc(table->entries, new_size * table->entry_size);
@@ -63,7 +85,7 @@ _kernel_oserror *array_alloc(array_t *table)
       if (!new_table)
 	return armeabisupport_ENOMEM;
       memset_clear_start = new_table + table->num_entries * table->entry_size;
-      memset_clear_length = table->num_entries * table->entry_size;
+      memset_clear_length = (new_size - table->num_entries) * table->entry_size;
     }
 
   memset(memset_clear_start, 0, memset_clear_length);
@@ -101,7 +123,7 @@ _kernel_oserror *array_alloc_entry(array_t *this, int *idx_ret)
     {
       LOG("%s:   No free entries (i=%d), extending array", __func__, i);
       /* No free entries, increase array.  */
-      _kernel_oserror *err = array_alloc(this);
+      _kernel_oserror *err = array_alloc(this, -1);
       if (err)
 	return err;
       i = (this->num_entries == ARRAY_INIT_NUM_ENTRIES) ? 0 : this->num_entries / 2;

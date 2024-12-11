@@ -25,6 +25,33 @@
 
 #define FDTABLE_BASE_FD 10000
 
+/* Return true if the FDs point to the same file/shm.  */
+static inline bool fdtable_entries_equal(fdtable_entry *fd1, fdtable_entry *fd2)
+{
+  if (fd1->type != fd2->type)
+    return false;
+
+  switch (fd1->type)
+  {
+    case fd_type_shared_file: {
+      openfiletable_entry *openfile_table = (openfiletable_entry *)&global.open_filetable;
+
+      return (openfile_table[fd1->opentable_idx].systemtable_idx ==
+	      openfile_table[fd2->opentable_idx].systemtable_idx);
+    }
+    case fd_type_shm: {
+      openshmtable_entry *openshm_table = (openshmtable_entry *)&global.open_shmtable;
+
+      return (openshm_table[fd1->opentable_idx].systemtable_idx ==
+	      openshm_table[fd2->opentable_idx].systemtable_idx);
+    }
+    default:
+      break;;
+  }
+
+  return false;
+}
+
 fdtable_entry *get_fdtable_entry(app_object *app, int fd)
 {
   array_t *fdtable = &app->fd_table;
@@ -629,6 +656,45 @@ _kernel_oserror *fdtable_dup(fdtable_entry *fd, int *new_fd_ret)
       __func__,
       array_get_entry_idx(&app->fd_table, fd),
       *new_fd_ret);
+
+  return NULL;
+}
+
+_kernel_oserror *fdtable_dup2(fdtable_entry *old_fd, int fd)
+{
+  _kernel_oserror *err;
+  app_object *app;
+  if ((err = app_find(&app)) != NULL)
+    return err;
+
+  fdtable_entry *new_fd;
+  /* Does the FD exist in the array?  */
+  if ((new_fd = get_fdtable_entry(app, fd)) != NULL)
+    {
+      /* The FD does exist in the array, is it in use?  */
+      if (array_entry_is_in_use(&new_fd->base))
+	{
+	  /* The intended FD is in use, is it the same as the old one?
+	   * If old_fd is a valid file descriptor, and new_fd has the
+	   * same value as old_fd, then dup2() does nothing, and returns
+	   * new_fd.  */
+	  if (fdtable_entries_equal(old_fd, new_fd))
+	    return NULL;
+	  /* Doesn't point to the same open object, close it first.  */
+	  fdtable_close(app, new_fd);
+	}
+    }
+  else
+    {
+      if ((err = array_alloc(&app->fd_table, fd - FDTABLE_BASE_FD)) != NULL)
+	return err;
+      new_fd = (fdtable_entry *)array_get_entry_ptr(&app->fd_table, fd - FDTABLE_BASE_FD);
+    }
+
+  array_entry_mark_used(&new_fd->base);
+  new_fd->type = old_fd->type;
+  new_fd->opentable_idx = old_fd->opentable_idx;
+  // TODO: Copy closeOnExec flag.
 
   return NULL;
 }

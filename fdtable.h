@@ -54,6 +54,7 @@ fdtable_set_lock(app_object *app, fdtable_entry *fd, int *type, int *whence, off
 _kernel_oserror *fdtable_fsync(fdtable_entry *fd);
 _kernel_oserror *fdtable_ftruncate(fdtable_entry *fd, off_t new_extent);
 _kernel_oserror *fdtable_dup(fdtable_entry *fd, int *new_fd_ret);
+_kernel_oserror *fdtable_dup2(fdtable_entry *fd, int new_fd);
 
 void fdtable_print(app_object *app);
 

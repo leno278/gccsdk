@@ -18,7 +18,7 @@
 #include "log.h"
 
 /* See if we already have a shared memory object with this name open and return
- * the index if so, otherwise -1.  */
+ * the index if so, otherwise ARRAY_INVALID_INDEX.  */
 static int shmtable_scan_for_name(const char *name)
 {
   array_t *shmtable = &global.system_shmtable;

@@ -51,12 +51,9 @@ module_swihandler (int number, _kernel_swi_regs * r, void *pw)
     case ARMEABISupport_FileOp - ARMEABISupport_00:
       err = file_op(r);
       break;
-    case ARMEABISupport_SetAsParent - ARMEABISupport_00: {
-      _kernel_oserror *err;
+    case ARMEABISupport_PreExec - ARMEABISupport_00: {
       app_object *app;
-      if ((err = app_find(&app)) != NULL)
-	return err;
-      global.parent = app;
+      global.parent = ((err = app_find(&app)) == NULL) ? app : NULL;
       break;
     }
     default:

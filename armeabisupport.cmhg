@@ -33,7 +33,7 @@ swi-decoding-table: ARMEABISupport,
 		    ShmOp,
 		    FdOp,
 		    FileOp,
-		    SetAsParent
+		    PreExec
 
 error-chunk-base-number: 0x81DC20
 

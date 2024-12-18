@@ -145,6 +145,7 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
 
       entry->type = fd_type_shared_file;
       entry->opentable_idx = openfiletbl_idx;
+      entry->close_on_exec = false;
 
       (*fd_ret) += FDTABLE_BASE_FD;
 
@@ -179,8 +180,6 @@ _kernel_oserror *fdtable_close(app_object *app, fdtable_entry *fd)
 {
   _kernel_oserror *err;
 
-  TRACE("%s: fd=%d", __func__, fd);
-
   switch (fd->type)
     {
     case fd_type_shared_file:
@@ -199,6 +198,7 @@ _kernel_oserror *fdtable_close(app_object *app, fdtable_entry *fd)
       break;
     }
 
+  fd->type = fd_type_invalid;
   array_entry_mark_unused(&fd->base);
 
   return err;
@@ -516,6 +516,11 @@ _kernel_oserror *fdtable_ftruncate(fdtable_entry *fd, off_t new_extent)
   {
     case fd_type_shared_file: {
       openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
+      TRACE("%s: fd=%d, new_extent=%ld, path=%s",
+	    __func__,
+	    fd,
+	    new_extent,
+	    systemfiletable_get_filename(openfile_entry->systemtable_idx));
       err = openfile_entry
 	    ? systemfiletable_ftruncate(openfile_entry->systemtable_idx, new_extent)
 	    : armeabisupport_EBADF;
@@ -538,6 +543,9 @@ _kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd
   _kernel_oserror *err;
   int sysshmtbl_idx = ARRAY_INVALID_INDEX;
   int openshmtbl_idx = ARRAY_INVALID_INDEX;
+
+  TRACE("%s: name=%s", __func__, name);
+  TRACE("%s:   oflag=%X, mode=%X", __func__, oflag, mode);
 
   if (strlen(name) > PATH_MAX)
     {
@@ -586,6 +594,7 @@ _kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd
 
       entry->type = fd_type_shm;
       entry->opentable_idx = openshmtbl_idx;
+      entry->close_on_exec = false;
 
       (*fd_ret) += FDTABLE_BASE_FD;
 
@@ -649,12 +658,13 @@ _kernel_oserror *fdtable_dup(fdtable_entry *fd, int *new_fd_ret)
 								  *new_fd_ret);
   new_entry->type = fd->type;
   new_entry->opentable_idx = fd->opentable_idx;
+  new_entry->close_on_exec = false;
 
   (*new_fd_ret) += FDTABLE_BASE_FD;
 
   LOG("%s: fd %d duplicated as fd %d",
       __func__,
-      array_get_entry_idx(&app->fd_table, fd),
+      array_get_entry_idx(&app->fd_table, &fd->base) + FDTABLE_BASE_FD,
       *new_fd_ret);
 
   return NULL;
@@ -694,7 +704,7 @@ _kernel_oserror *fdtable_dup2(fdtable_entry *old_fd, int fd)
   array_entry_mark_used(&new_fd->base);
   new_fd->type = old_fd->type;
   new_fd->opentable_idx = old_fd->opentable_idx;
-  // TODO: Copy closeOnExec flag.
+  new_fd->close_on_exec = false;
 
   return NULL;
 }
@@ -724,7 +734,7 @@ void fdtable_print(app_object *app)
   array_t *table = &app->fd_table;
   fdtable_entry *fd = (fdtable_entry *)table->entries;
 
-  printf("%-8s %-10s %s\n", "FD", "TYPE", "PATH");
+  COMMAND_PRINTF("%-8s %-10s %s\n", "FD", "TYPE", "PATH");
   for (int i = 0; i < table->num_entries; i++)
     if (array_entry_is_in_use(&fd[i].base))
       {
@@ -734,7 +744,7 @@ void fdtable_print(app_object *app)
 	    openfiletable_entry *open_entry =
 			(openfiletable_entry *)array_get_entry_ptr(&global.open_filetable,
 								   fd[i].opentable_idx);
-	    printf("%-8d %-10s %s\n",
+	    COMMAND_PRINTF("%-8d %-10s %s\n",
 		   i + FDTABLE_BASE_FD,
 		   "FILE",
 		   systemfiletable_get_filename(open_entry->systemtable_idx));
@@ -744,17 +754,27 @@ void fdtable_print(app_object *app)
 	    openshmtable_entry *open_entry =
 			(openshmtable_entry *)array_get_entry_ptr(&global.open_shmtable,
 								  fd[i].opentable_idx);
-	    printf("%-8d %-10s %s\n",
+	    COMMAND_PRINTF("%-8d %-10s %s\n",
 		   i + FDTABLE_BASE_FD,
 		   "SHM",
 		   systemshmtable_get_name(open_entry->systemtable_idx));
 	    break;
 	  }
 	  case fd_type_invalid:
-	    printf("%-8d %s\n",
+	    COMMAND_PRINTF("%-8d %s\n",
 		   i + FDTABLE_BASE_FD,
 		   "INVALID");
 	    break;
 	}
       }
+}
+
+void fdtable_close_on_exec(app_object *app)
+{
+  array_t *table = &app->fd_table;
+  fdtable_entry *fd = (fdtable_entry *)table->entries;
+
+  for (int i = 0; i < table->num_entries; i++)
+    if (array_entry_is_in_use(&fd[i].base) && fd[i].close_on_exec)
+      fdtable_close(app, &fd[i]);
 }

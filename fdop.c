@@ -26,6 +26,8 @@
 #define FDOP_FTRUNCATE		9
 #define FDOP_DUP		10
 #define FDOP_DUP2		11
+#define FDOP_GETFD		12
+#define FDOP_SETFD		13
 
 #define ENABLE_LOGGING 0
 #include "log.h"
@@ -114,6 +116,15 @@
  *	    r2 = destination FD
  *	  Exit:
  *	    r0 = new FD if successful (V flag clear) or error pointer (V flag set).
+ *     12 - GETFD (fcntl)
+ *	  Entry:
+ *	    r1 = fd
+ *	  Exit:
+ *	    r0 = 1 if close-on-exec flag set, 0 if not (V flag clear), or error pointer (V flag set)
+ *     13 - SETFD (fcntl)
+ *	  Entry:
+ *	    r1 = fd
+ *	    r2 = 0 to clear close-on-exec flag, any other value to set flag
 */
 
 _kernel_oserror *
@@ -144,6 +155,8 @@ fd_op(_kernel_swi_regs *r)
     break;
   }
   case FDOP_CLOSE:
+    TRACE("%s:FDOP_CLOSE: fd=%d", __func__, r->r[1]);
+
     err = fdtable_close(app, fd);
     break;
   case FDOP_SEEK:
@@ -158,8 +171,8 @@ fd_op(_kernel_swi_regs *r)
     TRACE("%s:FDOP_READ: fd=%d, buf=%p, count=%ld",
 	  __func__,
 	  r->r[1],
-	  buf,
-	  count);
+	  r->r[2],
+	  r->r[3]);
     err = fdtable_read(fd, (void *)r->r[2], r->r[3], &r->r[0]);
     break;
   case FDOP_WRITE:
@@ -213,11 +226,10 @@ fd_op(_kernel_swi_regs *r)
     err = fdtable_fsync(fd);
     break;
   case FDOP_FTRUNCATE:
-    TRACE("%s:FDOP_FTRUNCATE: fd=%d, new_extent=%ld, path=%s",
+    TRACE("%s:FDOP_FTRUNCATE: fd=%d, new_extent=%ld",
 	  __func__,
 	  r->r[1],
-	  new_extent,
-	  systemfiletable_get_filename(openfile_entry->systemtable_idx));
+	  r->r[2]);
     err = fdtable_ftruncate(fd, r->r[2]);
     break;
   case FDOP_DUP:
@@ -233,6 +245,19 @@ fd_op(_kernel_swi_regs *r)
 	  r->r[2]);
     if ((err = fdtable_dup2(fd, r->r[2])) == NULL)
       r->r[0] = r->r[2];
+    break;
+  case FDOP_SETFD:
+    TRACE("%s:FDOP_SETFD: fd=%d, close_on_exec=%d",
+	  __func__,
+	  r->r[1],
+	  r->r[2]);
+    fd->close_on_exec = (r->r[2] != 0);
+    break;
+  case FDOP_GETFD:
+    TRACE("%s:FDOP_SETFD: fd=%d",
+	  __func__,
+	  r->r[1]);
+    r->r[0] = fd->close_on_exec;
     break;
   default:
     err = armeabisupport_bad_reason;

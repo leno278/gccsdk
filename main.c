@@ -52,6 +52,9 @@ app_new(app_object **app_ret)
   if (global.parent)
     {
       array_copy(&app->fd_table, &global.parent->fd_table);
+
+      fdtable_close_on_exec(global.parent);
+
       global.parent = NULL;
     }
   else
@@ -139,7 +142,7 @@ void report_swi_error(const char *func, int line, _kernel_oserror *err)
   report_text(buffer);
 }
 
-static const char filename[] = "$.debug/log";
+static const char filename[] = "$.armeabisupport-debug-log";
 
 static void logwrite(const char *buffer)
 {

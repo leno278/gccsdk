@@ -50,12 +50,6 @@
 *	    r1 = name
 *	  Exit:
 *	    r0 = 0 for success (V flag clear) or error pointer (V flag set).
-*	2 - dup
-*	  Entry:
-*	    r1 = fd
-*	  Exit:
-*	    r0 = new handle (will not be the lowest fd in current process) if success (V flag
-*			     clear) or error pointer (V flag set).
 */
 
 static _kernel_oserror *shm_unlink(const char *name);

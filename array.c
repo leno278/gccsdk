@@ -57,11 +57,12 @@ _kernel_oserror *array_alloc(array_t *table, int include_idx_N)
   if (!table)
     return armeabisupport_EINVAL;
 
-  if (include_idx_N < table->num_entries)
-    return NULL; /* Array already includes the required index.  */
-
   if (include_idx_N >= 0)
-    include_idx_N = next_power_of_2(include_idx_N);
+    {
+      if (include_idx_N < table->num_entries)
+	return NULL; /* Array already includes the required index.  */
+      include_idx_N = next_power_of_2(include_idx_N);
+    }
 
   if (!table->entries)
     {
@@ -84,7 +85,7 @@ _kernel_oserror *array_alloc(array_t *table, int include_idx_N)
       LOG("%s: new array ptr = %p", __func__, new_table);
       if (!new_table)
 	return armeabisupport_ENOMEM;
-      memset_clear_start = new_table + table->num_entries * table->entry_size;
+      memset_clear_start = (void *)((unsigned)new_table + table->num_entries * table->entry_size);
       memset_clear_length = (new_size - table->num_entries) * table->entry_size;
     }
 

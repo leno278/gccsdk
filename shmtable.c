@@ -59,7 +59,7 @@ _kernel_oserror *systemshmtable_open_shm(const char *name, int flags, int mode, 
 	}
     }
 
-  LOG("%s: Return index %d for shm object %s", __func__, *idx_ret, canon_name);
+  LOG("%s: Return index %d for shm object %s", __func__, *idx_ret, name);
 
   return err;
 }
@@ -141,7 +141,7 @@ _kernel_oserror *openshmtable_deref_entry(int opentable_idx)
   openshmtable_entry *openshm_entry = (openshmtable_entry *)array_get_entry_ptr(&global.open_shmtable,
 										opentable_idx);
   openshm_entry->ref_count--;
-  LOG("%s:   new ref_count = %d, close file", __func__, openfile_entry->ref_count);
+  LOG("%s:   new ref_count = %d, close file", __func__, openshm_entry->ref_count);
   if (openshm_entry->ref_count == 0)
     {
       systemshmtable_close_shm(openshm_entry->systemtable_idx);

@@ -376,12 +376,12 @@ void systemfiletable_print(void)
   array_t *filetable = &global.system_filetable;
   systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
-  printf("%-4s %-12s %-12s %s", "Idx", "Ref", "File handle", "File");
+  COMMAND_PRINTF("%-4s %-12s %-12s %s\n", "Idx", "Ref", "File handle", "File");
   for (int i = 0; i < filetable->num_entries; i++)
     {
       if (entry[i].base.in_use)
 	{
-	  printf("%-4d %-12d %-12d %s", i, entry[i].ref_count, entry[i].file_handle, entry[i].filename);
+	  COMMAND_PRINTF("%-4d %-12d %-12d %s\n", i, entry[i].ref_count, entry[i].file_handle, entry[i].filename);
 	}
     }
 }
@@ -440,12 +440,12 @@ void openfiletable_print(void)
   array_t *filetable = &global.open_filetable;
   openfiletable_entry *entry = (openfiletable_entry *)filetable->entries;
 
-  printf("%-4s %-12s %-12s %-12s PATH", "IDX", "SYSIDX", "REF", "OFFSET");
+  COMMAND_PRINTF("%-4s %-12s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF", "OFFSET");
   for (int i = 0; i < filetable->num_entries; i++)
     {
       if (entry[i].base.in_use)
 	{
-	  printf("%-4d %-12d %-12d %-12ld %s",
+	  COMMAND_PRINTF("%-4d %-12d %-12d %-12ld %s\n",
 		 i,
 		 entry[i].systemtable_idx,
 		 entry[i].ref_count,

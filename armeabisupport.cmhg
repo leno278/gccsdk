@@ -33,7 +33,8 @@ swi-decoding-table: ARMEABISupport,
 		    ShmOp,
 		    FdOp,
 		    FileOp,
-		    PreExec
+		    PreExec,
+		    IPC
 
 error-chunk-base-number: 0x81DC20
 

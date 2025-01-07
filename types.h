@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <kernel.h>
 
+#define APP_NAME_MAX_LEN 32
 #define ALLOCATOR_NAME_MAX_LEN	32
 
 #define VALIDATE_VT 0
@@ -26,6 +27,16 @@
 typedef unsigned int stack_t;
 typedef unsigned char *eabi_PTR;
 typedef void *armeabi_allocator_t;
+
+typedef enum fd_type
+{
+  fd_type_INVALID = -1,
+  fd_type_SHM = 0,
+  fd_type_SHARED_FILE,
+  fd_type_IPC,
+  fd_type_MAX
+
+} fd_type;
 
 typedef struct pmp_phy_page_entry
 {
@@ -76,6 +87,7 @@ typedef struct _app_object
   link_list stack_list;
   stack_abort_data_object stack_abort_data;
   array_t fd_table;
+  char name[APP_NAME_MAX_LEN];
 } app_object;
 LINKLIST_ACCESS_FUNCTIONS (app_object)
 
@@ -94,10 +106,8 @@ typedef struct armeabisupport_globals
   unsigned os_memory_prot_read_write;
   unsigned os_memory_prot_exec;
 
-  array_t open_filetable;
-  array_t system_filetable;
-  array_t open_shmtable;
-  array_t system_shmtable;
+  array_t open_table[fd_type_MAX];
+  array_t system_table[fd_type_MAX];
 
   app_object *parent;
 
@@ -193,13 +203,6 @@ typedef struct _armeabisupport_allocator_mmap
   armeabisupport_allocator base;
   link_list block_list;
 } armeabisupport_allocator_mmap;
-
-typedef enum
-{
-  fdtype_INVALID,
-  fdtype_SHM,
-  fdtype_SHARED_FILE
-} fdtype;
 
 extern armeabisupport_globals global;
 

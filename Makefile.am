@@ -38,6 +38,10 @@ ARMEABISupport_SOURCES= \
 	fileop.h \
 	lock.c \
 	lock.h \
+	ipcop.c \
+	ipcop.h \
+	ipctable.c \
+	ipctable.h \
 	armeabisupport.cmhg
 
 include_HEADERS=armeabi-support.h

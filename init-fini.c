@@ -14,6 +14,7 @@
 #include "memory.h"
 #include "shmtable.h"
 #include "filetable.h"
+#include "ipctable.h"
 #include "mmap.h"
 
 #define ENABLE_TRACING 0
@@ -89,11 +90,22 @@ _kernel_oserror *module_initialise (const char *tail, int podule_base, void *pw)
 
   memset (&global, 0, sizeof (armeabisupport_globals));
 
-  array_ctor(&global.system_filetable, sizeof(systemfiletable_entry));
-  array_ctor(&global.system_shmtable, sizeof(systemshmtable_entry));
-  array_ctor(&global.open_filetable, sizeof(openfiletable_entry));
-  array_ctor(&global.open_shmtable, sizeof(openshmtable_entry));
+  static const int opentable_entry_size[fd_type_MAX] = {
+    sizeof(openshmtable_entry),
+    sizeof(openfiletable_entry),
+    sizeof(openipctable_entry)
+  };
+  static const int systemtable_entry_size[fd_type_MAX] = {
+    sizeof(systemshmtable_entry),
+    sizeof(systemfiletable_entry),
+    sizeof(systemipctable_entry)
+  };
 
+  for (int i = 0; i < fd_type_MAX; i++)
+    {
+      array_ctor(&global.system_table[i], systemtable_entry_size[i]);
+      array_ctor(&global.open_table[i], opentable_entry_size[i]);
+    }
 
   // linklist_init_list (&global.app_list);
   // global.flags.no_client_check = false;
@@ -152,17 +164,18 @@ _kernel_oserror *module_finalisation (int fatal, int podule_base, void *pw)
   // Remove all mmap allocations and allocators.
   allocator_destroy_all(&global.mmap_allocator_pool);
 
-  for (int i = 0; i < global.open_filetable.num_entries; i++)
-    if (global.open_filetable.entries[i].in_use)
+  for (int i = 0; i < global.open_table[fd_type_SHARED_FILE].num_entries; i++)
+    if (array_entry_is_in_use(&global.open_table[fd_type_SHARED_FILE].entries[i]))
       {
 	openfiletable_entry *entry = openfiletable_get_entry(i);
 	filelocklist_dtor(&entry->locks);
       }
 
-  array_dtor(&global.open_shmtable);
-  array_dtor(&global.open_filetable);
-  array_dtor(&global.system_shmtable);
-  array_dtor(&global.system_filetable);
+  for (int i = 0; i < fd_type_MAX; i++)
+    {
+      array_dtor(&global.system_table[i]);
+      array_dtor(&global.open_table[i]);
+    }
 
   remove_pre_filter();
   remove_post_filter();

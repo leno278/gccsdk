@@ -21,11 +21,19 @@
 #include "array.h"
 #include "debug.h"
 
+#define ENABLE_TRACING 1
+#include "trace.h"
+
+#define ENABLE_LOGGING 1
+#include "log.h"
+
 armeabisupport_globals global;
 
 _kernel_oserror *
-app_new(app_object **app_ret)
+app_new(app_object **app_ret, const char *name)
 {
+  TRACE("%s: name=%s", __func__, name);
+
   _kernel_oserror *err;
   unsigned app_base;
 
@@ -44,6 +52,12 @@ app_new(app_object **app_ret)
   app->stack_abort_data.stack_list = &app->stack_list;
   app->stack_abort_data.stack_allocator = &global.stack_allocator;
 
+  if (name && *app->name == '\0')
+    {
+      strncpy(app->name, name, APP_NAME_MAX_LEN);
+      app->name[APP_NAME_MAX_LEN - 1] = '\0';
+    }
+
   abort_register_internal(app, get_stack_abort_handler(), (unsigned)&app->stack_abort_data);
   abort_register_internal(app, get_mmap_abort_handler(), (unsigned)&global.mmap_allocator_pool);
 
@@ -51,9 +65,17 @@ app_new(app_object **app_ret)
 
   if (global.parent)
     {
+      LOG("%s: Copying %d entries from fd_table of parent '%s'", __func__,
+	  global.parent->fd_table.num_entries,
+	  global.parent->name);
+
       array_copy(&app->fd_table, &global.parent->fd_table);
 
-      fdtable_close_on_exec(global.parent);
+      fdtable_close_on_exec(app);
+
+#if ENABLE_LOGGING
+      fdtable_print(app);
+#endif
 
       global.parent = NULL;
     }
@@ -143,6 +165,7 @@ void report_swi_error(const char *func, int line, _kernel_oserror *err)
 }
 
 static const char filename[] = "$.armeabisupport-debug-log";
+static char buffer[512];
 
 static void logwrite(const char *buffer)
 {
@@ -169,7 +192,6 @@ static void logwrite(const char *buffer)
 
 void log_printf(const char *format, ...)
 {
-  char buffer[512];
   char *p = buffer;
   time_t t;
   struct tm *tmp;
@@ -197,10 +219,13 @@ void log_printf(const char *format, ...)
 
 void reporter_printf(const char *format, ...)
 {
-  char buffer[512];
   char *p = buffer;
   time_t t;
   struct tm *tmp;
+
+  app_object *app;
+  if (app_find(&app) != NULL)
+    return;
 
   va_list ap;
   va_start (ap, format);
@@ -209,6 +234,8 @@ void reporter_printf(const char *format, ...)
   tmp = localtime(&t);
 
   *p++ = '[';
+  p += snprintf(p, sizeof(buffer) - strlen(buffer) - 1, "%s", app->name);
+  *p++ = ':';
   p += strftime(p, sizeof(buffer) - strlen(buffer) - 1, "%d/%m  %T", tmp);
   *p++ = ']';
   *p++ = ' ';

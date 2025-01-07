@@ -63,7 +63,7 @@ static _kernel_oserror *osfile_read_file_info(const char *canon_filename,
 /* See if we already have the file open and return the index if so, otherwise -1.  */
 static int filetable_scan_for_canon_filename(const char *canon_filename)
 {
-  array_t *filetable = &global.system_filetable;
+  array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
   systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
   int i;
   for (i = 0; i < filetable->num_entries; i++)
@@ -181,7 +181,7 @@ static _kernel_oserror *systemfiletable_add_entry(const char *canon_name, int fl
 
   _kernel_oserror *err = NULL;
   int file_handle = 0;
-  array_t *filetable = &global.system_filetable;
+  array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
 
   int type = file_object_type(canon_name);
   if (flags & O_CREAT)
@@ -224,7 +224,7 @@ static _kernel_oserror *systemfiletable_add_entry(const char *canon_name, int fl
       systemfiletable_entry *entry = (systemfiletable_entry *)array_get_entry_ptr(filetable, *idx_ret);
 
       entry->filename = strdup(canon_name);
-      entry->ref_count = 1;
+      entry->table_base.ref_count = 1;
       entry->file_handle = file_handle;
 
       return NULL;
@@ -249,12 +249,12 @@ _kernel_oserror *systemfiletable_open_file(const char *canon_name, int flags, in
   int entry_idx = filetable_scan_for_canon_filename(canon_name);
   if (entry_idx != ARRAY_INVALID_INDEX)
     {
-      array_t *filetable = &global.system_filetable;
+      array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
       systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
-      entry[entry_idx].ref_count++;
+      entry[entry_idx].table_base.ref_count++;
       LOG("%s: Found existing entry for file %s", __func__, canon_name);
-      LOG("%s:   at index %d, ref count now %d", __func__, entry_idx, entry[entry_idx].ref_count);
+      LOG("%s:   at index %d, ref count now %d", __func__, entry_idx, entry[entry_idx].table_base.ref_count);
     }
   else
     {
@@ -272,16 +272,16 @@ _kernel_oserror *systemfiletable_close_file(int filetable_idx)
 {
   TRACE("%s: filetable_idx=%d", __func__, filetable_idx);
 
-  array_t *filetable = &global.system_filetable;
+  array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
   systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
-  if (entry[filetable_idx].base.in_use)
+  if (entry[filetable_idx].table_base.array_base.in_use)
     {
-      entry[filetable_idx].ref_count--;
+      entry[filetable_idx].table_base.ref_count--;
       LOG("%s:   Ref count now %d for file %s", __func__,
-	  entry[filetable_idx].ref_count,
+	  entry[filetable_idx].table_base.ref_count,
 	  entry[filetable_idx].filename);
-      if (entry[filetable_idx].ref_count == 0)
+      if (entry[filetable_idx].table_base.ref_count == 0)
 	{
 	  LOG("%s:   Closing file %s", __func__, entry[filetable_idx].filename);
 	  if (entry[filetable_idx].file_handle > 0)
@@ -294,7 +294,7 @@ _kernel_oserror *systemfiletable_close_file(int filetable_idx)
 	      free((void *)entry[filetable_idx].filename);
 	      entry[filetable_idx].filename = NULL;
 	    }
-	  entry[filetable_idx].base.in_use = 0;
+	  entry[filetable_idx].table_base.array_base.in_use = 0;
 	  return NULL;
 	}
     }
@@ -306,7 +306,7 @@ _kernel_oserror *systemfiletable_get_file_length(int filetable_idx, off_t *lengt
 {
 //  TRACE("%s: filetable_idx=%d", __func__, filetable_idx);
 
-  array_t *filetable = &global.system_filetable;
+  array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
   systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
   return osargs_get_file_extent(entry[filetable_idx].file_handle, length);
@@ -319,7 +319,7 @@ _kernel_oserror *systemfiletable_read_bytes(int systemtable_idx,
 					    int *bytes_not_read)
 {
 
-  array_t *filetable = &global.system_filetable;
+  array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
   systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
   TRACE("%s: systemtable_idx=%d, buf=%p, count=%d, file=%s",
@@ -340,7 +340,7 @@ _kernel_oserror *systemfiletable_write_bytes(int systemtable_idx,
 					     int *bytes_not_written)
 {
 
-  array_t *filetable = &global.system_filetable;
+  array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
   systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
   TRACE("%s: systemtable_idx=%d, buf=%p, count=%d, file=%s",
@@ -363,7 +363,7 @@ systemfiletable_get_info(int filetable_idx,
 			 off_t *length,
 			 unsigned *attributes)
 {
-  array_t *filetable = &global.system_filetable;
+  array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
   systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
   *name = entry[filetable_idx].filename;
@@ -373,15 +373,15 @@ systemfiletable_get_info(int filetable_idx,
 
 void systemfiletable_print(void)
 {
-  array_t *filetable = &global.system_filetable;
+  array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
   systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
   COMMAND_PRINTF("%-4s %-12s %-12s %s\n", "Idx", "Ref", "File handle", "File");
   for (int i = 0; i < filetable->num_entries; i++)
     {
-      if (entry[i].base.in_use)
+      if (entry[i].table_base.array_base.in_use)
 	{
-	  COMMAND_PRINTF("%-4d %-12d %-12d %s\n", i, entry[i].ref_count, entry[i].file_handle, entry[i].filename);
+	  COMMAND_PRINTF("%-4d %-12d %-12d %s\n", i, entry[i].table_base.ref_count, entry[i].file_handle, entry[i].filename);
 	}
     }
 }
@@ -390,7 +390,7 @@ _kernel_oserror *openfiletable_add_entry(int systemtable_idx, int flags, int mod
 {
   TRACE("%s: systemtable_idx=%d", __func__, systemtable_idx);
 
-  array_t *filetable = &global.open_filetable;
+  array_t *filetable = &global.open_table[fd_type_SHARED_FILE];
 
   LOG("%s:     systemtable index=%d", __func__, systemtable_idx);
 
@@ -403,13 +403,16 @@ _kernel_oserror *openfiletable_add_entry(int systemtable_idx, int flags, int mod
       entry->flags = flags;
       entry->mode = mode;
       entry->file_offset = 0;
-      entry->ref_count = 1;
+      entry->table_base.ref_count = 1;
 
-      if ((err = filelocklist_ctor(&entry->locks)) == NULL)
-	return NULL;
+      err = filelocklist_ctor(&entry->locks);
     }
 
-  LOG("%s:     err=%s", __func__, err->errmess);
+  if (err)
+    {
+      LOG("%s:     err=%s", __func__, err->errmess);
+    }
+
   return err;
 }
 
@@ -419,12 +422,12 @@ _kernel_oserror *openfiletable_deref_entry(int openfiletable_idx)
   _kernel_oserror *err = NULL;
 
   openfiletable_entry *openfile_entry = openfiletable_get_entry(openfiletable_idx);
-  openfile_entry->ref_count--;
-  LOG("%s:   new ref_count = %d, close file", __func__, openfile_entry->ref_count);
-  if (openfile_entry->ref_count == 0)
+  openfile_entry->table_base.ref_count--;
+  LOG("%s:   new ref_count = %d, close file", __func__, openfile_entry->table_base.ref_count);
+  if (openfile_entry->table_base.ref_count == 0)
     {
       err = systemfiletable_close_file(openfile_entry->systemtable_idx);
-      array_entry_mark_unused(&openfile_entry->base);
+      array_entry_mark_unused(&openfile_entry->table_base.array_base);
     }
 
 #if ENABLE_LOGGING
@@ -437,18 +440,18 @@ _kernel_oserror *openfiletable_deref_entry(int openfiletable_idx)
 
 void openfiletable_print(void)
 {
-  array_t *filetable = &global.open_filetable;
+  array_t *filetable = &global.open_table[fd_type_SHARED_FILE];
   openfiletable_entry *entry = (openfiletable_entry *)filetable->entries;
 
   COMMAND_PRINTF("%-4s %-12s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF", "OFFSET");
   for (int i = 0; i < filetable->num_entries; i++)
     {
-      if (entry[i].base.in_use)
+      if (array_entry_is_in_use(&entry[i].table_base.array_base))
 	{
 	  COMMAND_PRINTF("%-4d %-12d %-12d %-12ld %s\n",
 		 i,
 		 entry[i].systemtable_idx,
-		 entry[i].ref_count,
+		 entry[i].table_base.ref_count,
 		 entry[i].file_offset,
 		 systemfiletable_get_filename(entry[i].systemtable_idx));
 	}

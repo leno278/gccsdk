@@ -13,6 +13,7 @@
 #include "shm.h"
 #include "fileop.h"
 #include "fdop.h"
+#include "ipcop.h"
 #include "main.h"
 #include "types.h"
 
@@ -56,6 +57,9 @@ module_swihandler (int number, _kernel_swi_regs * r, void *pw)
       global.parent = ((err = app_find(&app)) == NULL) ? app : NULL;
       break;
     }
+    case ARMEABISupport_IPC - ARMEABISupport_00:
+      err = ipc_op(r);
+      break;
     default:
       err = error_BAD_SWI;
       break;

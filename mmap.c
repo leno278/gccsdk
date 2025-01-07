@@ -360,7 +360,7 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
       fd_entry = get_fdtable_entry(app, fd);
       if (!fd_entry
 	  || !array_entry_is_in_use(&fd_entry->base)
-	  || fd_entry->type == fd_type_invalid)
+	  || fd_entry->type == fd_type_INVALID)
 	{
 	  /* We were given a file descriptor, but it doesn't match any that we know of.  */
 	  LOG("armeabi_mmap: Invalid fd (%d)", fd);
@@ -369,13 +369,13 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
     }
 
   systemshmtable_entry *systemshm_entry = NULL;
-  if (fd_entry && fd_entry->type == fd_type_shm)
+  openshmtable_entry *openshm_entry = NULL;
+  if (fd_entry && fd_entry->type == fd_type_SHM)
     {
       TRACE("armeabi_mmap: shm detected, fd=%d", fd);
-      openshmtable_entry *openshm_entry =
-		      (openshmtable_entry *)array_get_entry_ptr(&global.open_shmtable,
+      openshm_entry = (openshmtable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHM],
 								fd_entry->opentable_idx);
-      systemshm_entry = (systemshmtable_entry *)array_get_entry_ptr(&global.system_shmtable,
+      systemshm_entry = (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
 								    openshm_entry->systemtable_idx);
 
       if (systemshm_entry->block != NULL)
@@ -383,12 +383,12 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
 	  /* We've already got a memory allocation for this shared memory object.  */
 	  *allocator_ret = systemshm_entry->allocator;
 	  *block_ret = systemshm_entry->block;
-	  systemshm_entry->ref_count++;
+	  openshm_entry->table_base.ref_count++;
 	  TRACE("armeabi_mmap: shm 0x%X already connected to mmap, name=\"%s\", new ref=%d, addr=0x%X",
-		 systemshm_entry,
-		 systemshm_entry->name,
-		 systemshm_entry->ref_count,
-		 page_to_addr(&systemshm_entry->allocator->base, systemshm_entry->block->start_page));
+		systemshm_entry,
+		systemshm_entry->name,
+		openshm_entry->table_base.ref_count,
+		page_to_addr(&systemshm_entry->allocator->base, systemshm_entry->block->start_page));
 	  return NULL;
 	}
     }
@@ -451,16 +451,16 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
 	*allocator_ret = (armeabisupport_allocator_mmap *)allocator;
 	*block_ret = block;
 
-	if (systemshm_entry)
+	if (openshm_entry && systemshm_entry)
 	  {
 	    block->is_shm = true;
 	    systemshm_entry->allocator = (armeabisupport_allocator_mmap *)allocator;
 	    systemshm_entry->block = block;
-	    systemshm_entry->ref_count++;
+	    openshm_entry->table_base.ref_count++;
 	    TRACE("armeabi_mmap: shm 0x%X connecting to mmap, name=\"%s\", new ref=%d, addr=0x%X",
 		  systemshm_entry,
 		  systemshm_entry->name,
-		  systemshm_entry->ref_count,
+		  openshm_entry->table_base.ref_count,
 		  page_to_addr(&systemshm_entry->allocator->base, systemshm_entry->block->start_page));
 	  }
         TRACE("armeabi_mmap: Allocated %d pages @ 0x%X from allocator %s\n",

@@ -646,7 +646,7 @@ allocator_new (const char *name,
 
   app_object *app;
   if ((err = app_find(&app)) != NULL)
-    err = app_new(&app);
+    err = app_new(&app, NULL);
 
   if (err)
     return err;
@@ -1238,14 +1238,14 @@ allocator_munmap (armeabisupport_allocator_mmap *allocator,
 		return armeabisupport_EBADF;
 
 	      /* Freeing whole block. Does it match a shared memory object? */
-	      if (fd->type == fd_type_shm)
+	      if (fd->type == fd_type_SHM)
 		{
 #if ENABLE_LOGGING
 		  openshmtable_entry *openshm_entry =
-				(openshmtable_entry *)array_get_entry_ptr(&global.open_shmtable,
+				(openshmtable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHM],
 									  fd-opentable_idx);
 		  systemshmtable_entry *systemshm_entry =
-				(systemshmtable_entry *)array_get_entry_ptr(&global.system_shmtable,
+				(systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
 									    openshm_entry->systemtable_idx);
 		  TRACE_SHM("allocator_munmap: shared memory object %p, \"%s\", fd=%d, addr=%p, len=%d, ref=%d",
 			    systemshm_entry,

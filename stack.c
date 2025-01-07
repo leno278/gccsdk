@@ -171,7 +171,7 @@ stack_alloc(unsigned page_count, unsigned num_guard_pages, const char *name,
 
   app_object *app;
   if ((err = app_find(&app)) != NULL)
-    err = app_new(&app);
+    err = app_new(&app, name);
 
   if (err)
     goto error__mapped;

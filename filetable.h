@@ -7,7 +7,7 @@
 #ifndef FILETABLE_H
 #define FILETABLE_H
 
-#include "array.h"
+#include "table_entry_base.h"
 #include "types.h"
 #include "lock.h"
 #include <unistd.h>
@@ -15,14 +15,12 @@
 
 typedef struct _openfiletable_entry
 {
-  array_entry_base base;
+  table_entry_base table_base;
 
   int systemtable_idx;
   int flags;
   int mode;
   off_t file_offset;
-
-  int ref_count;
 
   filelock_list locks;
 
@@ -30,7 +28,7 @@ typedef struct _openfiletable_entry
 
 static inline openfiletable_entry *openfiletable_get_entry(int idx)
 {
-  array_t *open_filetable = &global.open_filetable;
+  array_t *open_filetable = &global.open_table[fd_type_SHARED_FILE];
   openfiletable_entry *openfile_entry = (openfiletable_entry *)open_filetable->entries;
   return &openfile_entry[idx];
 }
@@ -58,10 +56,9 @@ void openfiletable_print(void);
 
 typedef struct _systemfiletable_entry
 {
-  array_entry_base base;
+  table_entry_base table_base;
 
   const char *filename;
-  int ref_count;
 
   int file_handle;
 
@@ -85,8 +82,9 @@ _kernel_oserror *systemfiletable_write_bytes(int fd, void *buf, size_t count, of
 
 static inline _kernel_oserror *systemfiletable_fsync(int systemtable_idx)
 {
-  array_t *system_filetable = &global.system_filetable;
-  systemfiletable_entry *entry = (systemfiletable_entry *)array_get_entry_ptr(system_filetable, systemtable_idx);
+  array_t *system_filetable = &global.system_table[fd_type_SHARED_FILE];
+  systemfiletable_entry *entry = (systemfiletable_entry *)array_get_entry_ptr(system_filetable,
+									      systemtable_idx);
 
   return osargs_flush_file(entry->file_handle);
 }
@@ -94,8 +92,9 @@ static inline _kernel_oserror *systemfiletable_fsync(int systemtable_idx)
 static inline _kernel_oserror *
 systemfiletable_ftruncate(int systemtable_idx, off_t new_extent)
 {
-  array_t *system_filetable = &global.system_filetable;
-  systemfiletable_entry *entry = (systemfiletable_entry *)array_get_entry_ptr(system_filetable, systemtable_idx);
+  array_t *system_filetable = &global.system_table[fd_type_SHARED_FILE];
+  systemfiletable_entry *entry = (systemfiletable_entry *)array_get_entry_ptr(system_filetable,
+									      systemtable_idx);
 
   return osargs_write_file_extent(entry->file_handle, new_extent);
 }
@@ -105,8 +104,9 @@ void systemfiletable_print(void);
 static inline const char *
 systemfiletable_get_filename(int systemtable_idx)
 {
-  array_t *system_filetable = &global.system_filetable;
-  systemfiletable_entry *entry = (systemfiletable_entry *)array_get_entry_ptr(system_filetable, systemtable_idx);
+  array_t *system_filetable = &global.system_table[fd_type_SHARED_FILE];
+  systemfiletable_entry *entry = (systemfiletable_entry *)array_get_entry_ptr(system_filetable,
+									      systemtable_idx);
   return entry->filename;
 }
 

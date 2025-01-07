@@ -482,12 +482,12 @@ filelocklist_lslocks(void)
 
   printf("MODE      START        END PATH\n");
   LOG("MODE      START        END PATH\n");
-  openfiletable_entry *file = (openfiletable_entry *)global.open_filetable.entries;
-  for (int i = 0; i < global.open_filetable.num_entries; i++)
+  openfiletable_entry *file = (openfiletable_entry *)global.open_table[fd_type_SHARED_FILE].entries;
+  for (int i = 0; i < global.open_table[fd_type_SHARED_FILE].num_entries; i++)
     {
-      if (file[i].base.in_use)
+      if (array_entry_is_in_use(&file[i].table_base.array_base))
 	{
-	  systemfiletable_entry *systemtable_entry = (systemfiletable_entry *)array_get_entry_ptr(&global.system_filetable, file->systemtable_idx);
+	  systemfiletable_entry *systemtable_entry = (systemfiletable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHARED_FILE], file->systemtable_idx);
 	  filelock_list *list = &file[i].locks;
 	  for (filelock *lock = filelocklist_get_first(list);
 	       lock;

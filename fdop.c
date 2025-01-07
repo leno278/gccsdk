@@ -150,7 +150,7 @@ fd_op(_kernel_swi_regs *r)
   {
   case FDOP_VALIDATE: {
     r->r[1] = fd->type;
-    if (fd->type == fd_type_invalid)
+    if (fd->type == fd_type_INVALID)
       err = armeabisupport_EBADF;
     break;
   }

@@ -69,8 +69,7 @@ app_new(app_object **app_ret, const char *name)
 	  global.parent->fd_table.num_entries,
 	  global.parent->name);
 
-      array_copy(&app->fd_table, &global.parent->fd_table);
-
+      fdtable_copy(app, global.parent);
       fdtable_close_on_exec(app);
 
 #if ENABLE_LOGGING

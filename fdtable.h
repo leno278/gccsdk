@@ -56,6 +56,7 @@ _kernel_oserror *fdtable_fsync(fdtable_entry *fd);
 _kernel_oserror *fdtable_ftruncate(fdtable_entry *fd, off_t new_extent);
 _kernel_oserror *fdtable_dup(fdtable_entry *fd, int *new_fd_ret);
 _kernel_oserror *fdtable_dup2(fdtable_entry *fd, int new_fd);
+void fdtable_copy(app_object *dst_app, app_object *src_app);
 void fdtable_close_on_exec(app_object *app);
 
 void fdtable_print(app_object *app);

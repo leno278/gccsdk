@@ -164,7 +164,7 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
   if ((err = fdtable_alloc_entry(app,
 				 fd_type_SHARED_FILE,
 				 openfiletbl_idx,
-				 /*close_on_exec=*/false,
+				 /*close_on_exec=*/(flags & O_CLOEXEC) != 0,
 				 fd_ret)) == NULL)
     {
       LOG("%s:   returned fd=%d", __func__, *fd_ret);
@@ -236,7 +236,6 @@ _kernel_oserror *fdtable_lseek(fdtable_entry *fd,
 {
   _kernel_oserror *err = NULL;
 
-
   if (fd->type != fd_type_SHARED_FILE)
     return armeabisupport_EINVAL;
 
@@ -251,11 +250,16 @@ _kernel_oserror *fdtable_lseek(fdtable_entry *fd,
       break;
     case SEEK_CUR:
       if ((LONG_MAX - openfile_entry->file_offset) < offset)
-	err = armeabisupport_EOVERFLOW;
-      else {
-	new_offset = openfile_entry->file_offset + offset;
-	LOG("%s: SEEK_CUR: new file offset = %ld", __func__, openfile_entry->file_offset);
-      }
+	{
+	  err = armeabisupport_EOVERFLOW;
+	  LOG("%s: SEEK_CUR: EOVERFLOW: LONG_MAX=%ld, file_offset=%ld, (LONG_MAX - file_offset)=%ld",
+	      __func__, LONG_MAX, openfile_entry->file_offset, LONG_MAX - openfile_entry->file_offset);
+	}
+      else
+	{
+	  new_offset = openfile_entry->file_offset + offset;
+	  LOG("%s: SEEK_CUR: new file offset = %ld", __func__, openfile_entry->file_offset);
+	}
       break;
     case SEEK_END: {
       off_t file_length;
@@ -913,6 +917,23 @@ void fdtable_print(app_object *app)
 		   "INVALID");
 	    break;
 	}
+      }
+}
+
+void fdtable_copy(app_object *dst_app, app_object *src_app)
+{
+  array_copy(&dst_app->fd_table, &src_app->fd_table);
+
+  array_t *array = &dst_app->fd_table;
+  fdtable_entry *fd = (fdtable_entry *)array->entries;
+
+  for (int i = 0; i < array->num_entries; i++)
+    if (array_entry_is_in_use(&fd[i].base))
+      {
+	table_entry_base *open_table;
+	open_table = (table_entry_base *)array_get_entry_ptr(&global.open_table[fd[i].type],
+							     fd[i].opentable_idx);
+	open_table->ref_count++;
       }
 }
 

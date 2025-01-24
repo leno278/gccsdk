@@ -12,10 +12,10 @@
 #include "main.h"
 #include <string.h>
 
-#define ENABLE_LOGGING 0
+#define ENABLE_LOGGING 1
 #include "log.h"
 
-#define ENABLE_TRACING 0
+#define ENABLE_TRACING 1
 #include "trace.h"
 
 #define IPCOP_OPEN		0
@@ -27,6 +27,12 @@
 #define IPCOP_STATUS		6
 
 #define FD_MARKER		0x7e57ed
+
+typedef enum ipc_status
+{
+  ipc_status_READ_READY = 1
+
+} ipc_status;
 
 #if ENABLE_LOGGING
 static const char *fd_type_str[] =
@@ -134,14 +140,16 @@ static _kernel_oserror *ipcop_write(int fd, void *buffer, size_t len)
     return err;
 
   fdtable_entry *fd_entry;
-  if ((fd_entry = get_fdtable_entry(app, fd)) == NULL)
+  if ((fd_entry = get_fdtable_entry(app, fd)) == NULL ||
+      !array_entry_is_in_use(&fd_entry->base) ||
+      fd_entry->type != fd_type_IPC)
     {
       LOG("%s: fdtable_entry not found: armeabisupport_EBADF", __func__);
       return armeabisupport_EBADF;
     }
 
   openipctable_entry *openipc = (openipctable_entry *)array_get_entry_ptr(&global.open_table[fd_type_IPC], fd_entry->opentable_idx);
-  if (!openipc)
+  if (!openipc || !array_entry_is_in_use(&openipc->table_base.array_base))
     {
       LOG("%s: openipctable_entry not found: armeabisupport_EBADF", __func__);
       return armeabisupport_EBADF;
@@ -168,7 +176,9 @@ static _kernel_oserror *ipcop_write_fds(int fd, int *fds, size_t count)
     return err;
 
   fdtable_entry *fd_entry;
-  if ((fd_entry = get_fdtable_entry(app, fd)) == NULL)
+  if ((fd_entry = get_fdtable_entry(app, fd)) == NULL ||
+      !array_entry_is_in_use(&fd_entry->base) ||
+      fd_entry->type != fd_type_IPC)
     {
       LOG("%s: fdtable_entry not found: armeabisupport_EBADF", __func__);
       return armeabisupport_EBADF;
@@ -176,7 +186,7 @@ static _kernel_oserror *ipcop_write_fds(int fd, int *fds, size_t count)
 
   openipctable_entry *openipc = (openipctable_entry *)array_get_entry_ptr(&global.open_table[fd_type_IPC],
 									  fd_entry->opentable_idx);
-  if (!openipc)
+  if (!openipc || !array_entry_is_in_use(&openipc->table_base.array_base))
     {
       LOG("%s: openipctable_entry not found: armeabisupport_EBADF", __func__);
       return armeabisupport_EBADF;
@@ -240,14 +250,16 @@ static _kernel_oserror *ipcop_read(int fd, void *buffer, size_t len)
     return err;
 
   fdtable_entry *fd_entry;
-  if ((fd_entry = get_fdtable_entry(app, fd)) == NULL)
+  if ((fd_entry = get_fdtable_entry(app, fd)) == NULL ||
+      !array_entry_is_in_use(&fd_entry->base) ||
+      fd_entry->type != fd_type_IPC)
     {
       LOG("%s: fd_entry not found: armeabisupport_EBADF", __func__);
       return armeabisupport_EBADF;
     }
 
   openipctable_entry *openipc = (openipctable_entry *)array_get_entry_ptr(&global.open_table[fd_type_IPC], fd_entry->opentable_idx);
-  if (!openipc)
+  if (!openipc || !array_entry_is_in_use(&openipc->table_base.array_base))
     {
       LOG("%s: openipctable_entry not found: armeabisupport_EBADF", __func__);
       return armeabisupport_EBADF;
@@ -274,14 +286,16 @@ static _kernel_oserror *ipcop_read_raw(int fd, size_t len, void **addr_ret)
     return err;
 
   fdtable_entry *fd_entry;
-  if ((fd_entry = get_fdtable_entry(app, fd)) == NULL)
+  if ((fd_entry = get_fdtable_entry(app, fd)) == NULL ||
+      !array_entry_is_in_use(&fd_entry->base) ||
+      fd_entry->type != fd_type_IPC)
     {
       LOG("%s: fdtable_entry not found: armeabisupport_EBADF", __func__);
       return armeabisupport_EBADF;
     }
 
   openipctable_entry *openipc = (openipctable_entry *)array_get_entry_ptr(&global.open_table[fd_type_IPC], fd_entry->opentable_idx);
-  if (!openipc)
+  if (!openipc || !array_entry_is_in_use(&openipc->table_base.array_base))
     {
       LOG("%s: openipctable_entry not found: armeabisupport_EBADF", __func__);
       return armeabisupport_EBADF;
@@ -308,14 +322,16 @@ static _kernel_oserror *ipcop_read_fds(int fd, int *fds)
     return err;
 
   fdtable_entry *receiver_fd_entry;
-  if ((receiver_fd_entry = get_fdtable_entry(app, fd)) == NULL)
+  if ((receiver_fd_entry = get_fdtable_entry(app, fd)) == NULL ||
+      !array_entry_is_in_use(&receiver_fd_entry->base) ||
+      receiver_fd_entry->type != fd_type_IPC)
     {
       LOG("%s: fdtable_entry not found: armeabisupport_EBADF", __func__);
       return armeabisupport_EBADF;
     }
 
   openipctable_entry *openipc = (openipctable_entry *)array_get_entry_ptr(&global.open_table[fd_type_IPC], receiver_fd_entry->opentable_idx);
-  if (!openipc)
+  if (!openipc || !array_entry_is_in_use(&openipc->table_base.array_base))
     {
       LOG("%s: openipctable_entry not found: armeabisupport_EBADF", __func__);
       return armeabisupport_EBADF;
@@ -393,11 +409,15 @@ bad_fd:
 
   ipc_ensure_aligned_read64(openipc);
 
-#if ENABLE_LOGGING
-  LOG("%s: SENDER '%s' FD TABLE:", __func__, sender_app->name);
-  fdtable_print(sender_app);
-  LOG("%s: RECEIVER '%s' FD TABLE:", __func__, app->name);
-  fdtable_print(app);
+#if 0
+  ENABLE_LOGGING
+  if (count)
+    {
+      LOG("%s: SENDER '%s' FD TABLE:", __func__, sender_app->name);
+      fdtable_log(sender_app);
+      LOG("%s: RECEIVER '%s' FD TABLE:", __func__, app->name);
+      fdtable_log(app);
+    }
 #endif
 
   return NULL;
@@ -412,23 +432,37 @@ static _kernel_oserror *ipcop_status(int fd, unsigned *flags_ret)
   _kernel_oserror *err;
   app_object *app;
   if ((err = app_find(&app)) != NULL)
-    return err;
+    {
+      LOG("%s: fd=%d, app_find failed, err = %s", __func__, fd, err->errmess);
+      return err;
+    }
 
   fdtable_entry *fd_entry;
-  if ((fd_entry = get_fdtable_entry(app, fd)) == NULL)
-    return armeabisupport_EBADF;
+  if ((fd_entry = get_fdtable_entry(app, fd)) == NULL ||
+      !array_entry_is_in_use(&fd_entry->base) ||
+      fd_entry->type != fd_type_IPC)
+    {
+      LOG("%s: fd=%d, fd_entry=%p", __func__, fd, fd_entry);
+      return armeabisupport_EBADF;
+    }
 
   openipctable_entry *openipc1 = (openipctable_entry *)array_get_entry_ptr(&global.open_table[fd_type_IPC],
 									   fd_entry->opentable_idx);
-  if (!openipc1)
-    return armeabisupport_EBADF;
+  if (!openipc1 || !array_entry_is_in_use(&openipc1->table_base.array_base))
+    {
+      LOG("%s: fd=%d, openipc1 == NULL", __func__, fd);
+      return armeabisupport_EBADF;
+    }
 
   openipctable_entry *openipc2 = (openipctable_entry *)array_get_entry_ptr(&global.open_table[fd_type_IPC],
 									   openipc1->openipctable_oppend_idx);
-  if (!openipc2)
-    return armeabisupport_EBADF;
+  if (!openipc2 || !array_entry_is_in_use(&openipc2->table_base.array_base))
+    {
+      LOG("%s: fd=%d, openipc2 == NULL", __func__, fd);
+      return armeabisupport_EBADF;
+    }
 
-  *flags_ret = openipc1->read_pos < openipc2->write_pos;
+  *flags_ret = openipc1->read_pos != openipc2->write_pos;
 
   if (*flags_ret)
     {
@@ -436,7 +470,7 @@ static _kernel_oserror *ipcop_status(int fd, unsigned *flags_ret)
 	  fd, *flags_ret, openipc1->read_pos, openipc2->write_pos);
     }
 
-//  fdtable_print(app);
+//  fdtable_log(app);
 
   return NULL;
 }

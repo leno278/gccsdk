@@ -1,11 +1,12 @@
 /* filetable.c
  *
- * Copyright 2024 GCCSDK Developers
+ * Copyright 2024,2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
 #include "armeabisupport.h"
 #include "filetable.h"
+#include "fdtable.h"
 #include "types.h"
 #include <string.h>
 #include <stdlib.h>
@@ -268,22 +269,25 @@ _kernel_oserror *systemfiletable_open_file(const char *canon_name, int flags, in
   return err;
 }
 
-_kernel_oserror *systemfiletable_close_file(int filetable_idx)
+_kernel_oserror *systemfiletable_deref_entry(int filetable_idx)
 {
   TRACE("%s: filetable_idx=%d", __func__, filetable_idx);
 
   array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
   systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
-  if (entry[filetable_idx].table_base.array_base.in_use)
+  if (array_entry_is_in_use(&entry[filetable_idx].table_base.array_base))
     {
       entry[filetable_idx].table_base.ref_count--;
-      LOG("%s:   Ref count now %d for file %s", __func__,
+      LOG("%s:   System table ref count now %d for file handle %d (%s)", __func__,
 	  entry[filetable_idx].table_base.ref_count,
+	  entry[filetable_idx].file_handle,
 	  entry[filetable_idx].filename);
       if (entry[filetable_idx].table_base.ref_count == 0)
 	{
-	  LOG("%s:   Closing file %s", __func__, entry[filetable_idx].filename);
+	  LOG("%s:   Closing file handle %d (%s)", __func__,
+	      entry[filetable_idx].file_handle,
+	      entry[filetable_idx].filename);
 	  if (entry[filetable_idx].file_handle > 0)
 	    {
 	      osfile_close(entry[filetable_idx].file_handle);
@@ -294,7 +298,7 @@ _kernel_oserror *systemfiletable_close_file(int filetable_idx)
 	      free((void *)entry[filetable_idx].filename);
 	      entry[filetable_idx].filename = NULL;
 	    }
-	  entry[filetable_idx].table_base.array_base.in_use = 0;
+	  array_entry_mark_unused(&entry[filetable_idx].table_base.array_base);
 	  return NULL;
 	}
     }
@@ -371,21 +375,6 @@ systemfiletable_get_info(int filetable_idx,
   return osfile_read_file_info(entry[filetable_idx].filename, type, load, exec, length, attributes);
 }
 
-void systemfiletable_print(void)
-{
-  array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
-  systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
-
-  COMMAND_PRINTF("%-4s %-12s %-12s %s\n", "Idx", "Ref", "File handle", "File");
-  for (int i = 0; i < filetable->num_entries; i++)
-    {
-      if (entry[i].table_base.array_base.in_use)
-	{
-	  COMMAND_PRINTF("%-4d %-12d %-12d %s\n", i, entry[i].table_base.ref_count, entry[i].file_handle, entry[i].filename);
-	}
-    }
-}
-
 _kernel_oserror *openfiletable_add_entry(int systemtable_idx, int flags, int mode, int *idx_ret)
 {
   TRACE("%s: systemtable_idx=%d", __func__, systemtable_idx);
@@ -422,18 +411,18 @@ _kernel_oserror *openfiletable_deref_entry(int openfiletable_idx)
   _kernel_oserror *err = NULL;
 
   openfiletable_entry *openfile_entry = openfiletable_get_entry(openfiletable_idx);
-  openfile_entry->table_base.ref_count--;
-  LOG("%s:   new ref_count = %d, close file", __func__, openfile_entry->table_base.ref_count);
-  if (openfile_entry->table_base.ref_count == 0)
-    {
-      err = systemfiletable_close_file(openfile_entry->systemtable_idx);
-      array_entry_mark_unused(&openfile_entry->table_base.array_base);
-    }
 
-#if ENABLE_LOGGING
-  systemfiletable_print();
-  openfiletable_print();
-#endif
+  if (openfile_entry && array_entry_is_in_use(&openfile_entry->table_base.array_base))
+    {
+      openfile_entry->table_base.ref_count--;
+      LOG("%s:   Open table ref count now %d", __func__, openfile_entry->table_base.ref_count);
+      if (openfile_entry->table_base.ref_count == 0)
+	{
+	  err = systemfiletable_deref_entry(openfile_entry->systemtable_idx);
+	  openfile_entry->systemtable_idx = ARRAY_INVALID_INDEX;
+	  array_entry_mark_unused(&openfile_entry->table_base.array_base);
+	}
+    }
 
   return err;
 }
@@ -443,12 +432,12 @@ void openfiletable_print(void)
   array_t *filetable = &global.open_table[fd_type_SHARED_FILE];
   openfiletable_entry *entry = (openfiletable_entry *)filetable->entries;
 
-  COMMAND_PRINTF("%-4s %-12s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF", "OFFSET");
+  printf("%-4s %-12s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF", "OFFSET");
   for (int i = 0; i < filetable->num_entries; i++)
     {
       if (array_entry_is_in_use(&entry[i].table_base.array_base))
 	{
-	  COMMAND_PRINTF("%-4d %-12d %-12d %-12ld %s\n",
+	  printf("%-4d %-12d %-12d %-12ld %s\n",
 		 i,
 		 entry[i].systemtable_idx,
 		 entry[i].table_base.ref_count,
@@ -457,3 +446,57 @@ void openfiletable_print(void)
 	}
     }
 }
+
+void systemfiletable_print(void)
+{
+  array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
+  systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
+
+  printf("%-4s %-12s %-12s %s\n", "Idx", "Ref", "File handle", "File");
+  for (int i = 0; i < filetable->num_entries; i++)
+    {
+      if (entry[i].table_base.array_base.in_use)
+	{
+	  printf("%-4d %-12d %-12d %s\n", i, entry[i].table_base.ref_count, entry[i].file_handle, entry[i].filename);
+	}
+    }
+}
+
+#if ENABLE_LOGGING
+
+void openfiletable_log(void)
+{
+  array_t *filetable = &global.open_table[fd_type_SHARED_FILE];
+  openfiletable_entry *entry = (openfiletable_entry *)filetable->entries;
+
+  reporter_printf("%-4s %-12s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF", "OFFSET");
+  for (int i = 0; i < filetable->num_entries; i++)
+    {
+      if (array_entry_is_in_use(&entry[i].table_base.array_base))
+	{
+	  reporter_printf("%-4d %-12d %-12d %-12ld %s\n",
+			  i,
+			  entry[i].systemtable_idx,
+			  entry[i].table_base.ref_count,
+			  entry[i].file_offset,
+			  systemfiletable_get_filename(entry[i].systemtable_idx));
+	}
+    }
+}
+
+void systemfiletable_log(void)
+{
+  array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
+  systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
+
+  reporter_printf("%-4s %-12s %-12s %s\n", "Idx", "Ref", "File handle", "File");
+  for (int i = 0; i < filetable->num_entries; i++)
+    {
+      if (entry[i].table_base.array_base.in_use)
+	{
+	  reporter_printf("%-4d %-12d %-12d %s\n", i, entry[i].table_base.ref_count, entry[i].file_handle, entry[i].filename);
+	}
+    }
+}
+
+#endif

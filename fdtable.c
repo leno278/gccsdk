@@ -1,6 +1,6 @@
 /* fdtable.c
  *
- * Copyright 2024 GCCSDK Developers
+ * Copyright 2024,2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -25,7 +25,7 @@
 #define ENABLE_LOGGING 0
 #include "log.h"
 
-#define FDTABLE_BASE_FD 10000
+#define FDTABLE_BASE_FD 1000
 
 /* Return true if the FDs point to the same file/shm.  */
 static inline bool fdtable_entries_equal(fdtable_entry *fd1, fdtable_entry *fd2)
@@ -155,8 +155,8 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
     goto error_return;
 
 #if ENABLE_LOGGING
-  systemfiletable_print();
-  openfiletable_print();
+  systemfiletable_log();
+  openfiletable_log();
 #endif
 
   LOG("%s:     opentable index=%d", __func__, openfiletbl_idx);
@@ -170,7 +170,7 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
       LOG("%s:   returned fd=%d", __func__, *fd_ret);
 
 #if ENABLE_LOGGING
-      fdtable_print(app);
+      fdtable_log(app);
 #endif
 
       return NULL;
@@ -214,9 +214,7 @@ _kernel_oserror *fdtable_close(app_object *app, fdtable_entry *fd)
       err = openshmtable_deref_entry(fd->opentable_idx);
       break;
     case fd_type_IPC:
-      LOG("%s: Close IPC FD %d", __func__,
-	  array_get_entry_idx(&app->fd_table, &fd->base) + FDTABLE_BASE_FD);
-      err = NULL;
+      err = openipctable_deref_entry(fd->opentable_idx);
       break;
     default:
       err = armeabisupport_EBADF;
@@ -224,7 +222,14 @@ _kernel_oserror *fdtable_close(app_object *app, fdtable_entry *fd)
     }
 
   fd->type = fd_type_INVALID;
+  fd->opentable_idx = ARRAY_INVALID_INDEX;
   array_entry_mark_unused(&fd->base);
+
+#if ENABLE_LOGGING
+  fdtable_log(NULL);
+  openshmtable_log();
+  systemshmtable_log();
+#endif
 
   return err;
 }
@@ -630,7 +635,7 @@ _kernel_oserror *fdtable_open_ipc(size_t size, int fd_ret[2])
   fd_ret[1] = fd2 + FDTABLE_BASE_FD;
 
 #if ENABLE_LOGGING
-  fdtable_print(app);
+  fdtable_log(app);
 #endif
 
   return NULL;
@@ -699,9 +704,10 @@ _kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd
     }
 
   LOG("%s:     openshmtable index=%d", __func__, openshmtbl_idx);
+
 #if ENABLE_LOGGING
-      LOG("%s: BEFORE ALLOC",__func__);
-      fdtable_print(app);
+  LOG("%s: BEFORE ALLOC",__func__);
+  fdtable_log(app);
 #endif
 
   if ((err = fdtable_alloc_entry(app,
@@ -714,7 +720,7 @@ _kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd
 
 #if ENABLE_LOGGING
       LOG("%s: AFTER ALLOC",__func__);
-      fdtable_print(app);
+      fdtable_log(app);
 #endif
 
       return NULL;
@@ -758,30 +764,6 @@ _kernel_oserror *fdtable_dup(fdtable_entry *fd, int *new_fd_ret)
   open_table = (table_entry_base *)array_get_entry_ptr(&global.open_table[fd->type],
 						       fd->opentable_idx);
   open_table->ref_count++;
-/*  switch (fd->type)
-  {
-    case fd_type_shared_file: {
-      openfiletable_entry *openfile_entry =
-		(openfiletable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHARED_FILE],
-							   fd->opentable_idx);
-      openfile_entry->table_base.ref_count++;
-      break;
-    }
-    case fd_type_shm: {
-      openshmtable_entry *openshm_entry =
-		(openshmtable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHM],
-							  fd->opentable_idx);
-      openshm_entry->table_base.ref_count++;
-      break;
-    }
-    case fd_type_ipc: {
-      LOG("%s: WARNING: Attempt to dup IPC fd %d", __func__,
-	  array_get_entry_idx(&app->fd_table, &fd->base) + FDTABLE_BASE_FD);
-      break;
-    }
-    default:
-      return armeabisupport_EBADF;
-  }*/
 
   if ((err = fdtable_alloc_entry(app,
 				 fd->type,
@@ -796,6 +778,10 @@ _kernel_oserror *fdtable_dup(fdtable_entry *fd, int *new_fd_ret)
       *new_fd_ret,
       fd->opentable_idx,
       open_table->ref_count);
+
+#if ENABLE_LOGGING
+  fdtable_log(NULL);
+#endif
 
   return NULL;
 }
@@ -869,7 +855,7 @@ void fdtable_print(app_object *app)
   array_t *table = &app->fd_table;
   fdtable_entry *fd = (fdtable_entry *)table->entries;
 
-  COMMAND_PRINTF("%-8s %-10s %s\n", "FD", "TYPE", "REF");
+  printf("%-8s %s\n", "FD", "TYPE");
   for (int i = 0; i < table->num_entries; i++)
     if (array_entry_is_in_use(&fd[i].base))
       {
@@ -879,40 +865,63 @@ void fdtable_print(app_object *app)
 	    openfiletable_entry *open_entry =
 			(openfiletable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHARED_FILE],
 								   fd[i].opentable_idx);
-	    COMMAND_PRINTF("%-8d %-10s %-4d PATH:%s\n",
+	    systemfiletable_entry *system_entry =
+			(systemfiletable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHARED_FILE],
+								   open_entry->systemtable_idx);
+	    printf("%-8d %-10s     OPEN IDX:%-3d REF:%d\n",
 		   i + FDTABLE_BASE_FD,
 		   "FILE",
-		   open_entry->table_base.ref_count,
-		   systemfiletable_get_filename(open_entry->systemtable_idx));
+		   fd[i].opentable_idx,
+		   open_entry->table_base.ref_count);
+	    printf("                     SYSTEM IDX:%-3d REF:%-3d PATH:%s\n",
+		   open_entry->systemtable_idx,
+		   system_entry->table_base.ref_count,
+		   system_entry->filename);
 	    break;
 	  }
 	  case fd_type_SHM: {
 	    openshmtable_entry *open_entry =
 			(openshmtable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHM],
 								  fd[i].opentable_idx);
-	    COMMAND_PRINTF("%-8d %-10s %-4d NAME:%s\n",
+	    systemshmtable_entry *system_entry =
+			(systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
+								   open_entry->systemtable_idx);
+	    printf("%-8d %-10s     OPEN IDX:%-3d REF:%d\n",
 		   i + FDTABLE_BASE_FD,
 		   "SHM",
-		   open_entry->table_base.ref_count,
-		   systemshmtable_get_name(open_entry->systemtable_idx));
+		   fd[i].opentable_idx,
+		   open_entry->table_base.ref_count);
+	    printf("                     SYSTEM IDX:%-3d REF:%-3d NAME:%s\n",
+		   open_entry->systemtable_idx,
+		   system_entry->table_base.ref_count,
+		   system_entry->name);
 	    break;
 	  }
 	  case fd_type_IPC: {
 	    openipctable_entry *open_entry =
 			(openipctable_entry *)array_get_entry_ptr(&global.open_table[fd_type_IPC],
 								  fd[i].opentable_idx);
-	    COMMAND_PRINTF("%-8d %-10s %-4d WB:%10X RB:%10X WP:%10d RP:%10d\n",
+	    systemipctable_entry *system_entry =
+			(systemipctable_entry *)array_get_entry_ptr(&global.system_table[fd_type_IPC],
+								   open_entry->systemtable_idx);
+	    printf("%-8d %-10s WB:%10X RB:%10X WP:%10d RP:%10d\n",
 		   i + FDTABLE_BASE_FD,
 		   "IPC",
-		   open_entry->table_base.ref_count,
-		   open_entry->write_buffer,
-		   open_entry->read_buffer,
+		   (unsigned)open_entry->write_buffer,
+		   (unsigned)open_entry->read_buffer,
 		   open_entry->write_pos,
 		   open_entry->read_pos);
+	    printf("                  OPEN IDX:%-3d REF:%d\n",
+		   fd[i].opentable_idx,
+		   open_entry->table_base.ref_count);
+	    printf("                        SYSTEM IDX:%-3d REF:%d\n",
+		   open_entry->systemtable_idx,
+		   system_entry->table_base.ref_count);
 	    break;
 	  }
 	  case fd_type_INVALID:
-	    COMMAND_PRINTF("%-8d %s\n",
+	  default:
+	    printf("%-8d %s\n",
 		   i + FDTABLE_BASE_FD,
 		   "INVALID");
 	    break;
@@ -951,3 +960,94 @@ void fdtable_close_on_exec(app_object *app)
 	fdtable_close(app, &fd[i]);
       }
 }
+
+#if ENABLE_LOGGING
+void fdtable_log(app_object *app)
+{
+  if (!app)
+    {
+      _kernel_oserror *err;
+
+      if ((err = app_find(&app)) != NULL)
+	return;
+    }
+
+  array_t *table = &app->fd_table;
+  fdtable_entry *fd = (fdtable_entry *)table->entries;
+
+  reporter_printf("%-8s %s", "FD", "TYPE");
+
+  for (int i = 0; i < table->num_entries; i++)
+    if (array_entry_is_in_use(&fd[i].base))
+      {
+	switch (fd[i].type)
+	{
+	  case fd_type_SHARED_FILE: {
+	    openfiletable_entry *open_entry =
+			(openfiletable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHARED_FILE],
+								   fd[i].opentable_idx);
+	    systemfiletable_entry *system_entry =
+			(systemfiletable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHARED_FILE],
+								   open_entry->systemtable_idx);
+	    reporter_printf("%-8d %-10s  OPEN IDX:%-3d REF:%d",
+			    i + FDTABLE_BASE_FD,
+			    "FILE",
+			    fd[i].opentable_idx,
+			    open_entry->table_base.ref_count);
+	    reporter_printf("                   SYSTEM IDX:%-3d REF:%-3d HANDLE:%d PATH:%s",
+			    open_entry->systemtable_idx,
+			    system_entry->table_base.ref_count,
+			    system_entry->file_handle,
+			    system_entry->filename);
+	    break;
+	  }
+	  case fd_type_SHM: {
+	    openshmtable_entry *open_entry =
+			(openshmtable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHM],
+								  fd[i].opentable_idx);
+	    systemshmtable_entry *system_entry =
+			(systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
+								   open_entry->systemtable_idx);
+	    reporter_printf("%-8d %-10s  OPEN IDX:%-3d REF:%d",
+			    i + FDTABLE_BASE_FD,
+			    "SHM",
+			    fd[i].opentable_idx,
+			    open_entry->table_base.ref_count);
+	    reporter_printf("                   SYSTEM IDX:%-3d REF:%-3d NAME:%s",
+			    open_entry->systemtable_idx,
+			    system_entry->table_base.ref_count,
+			    system_entry->name);
+	    break;
+	  }
+	  case fd_type_IPC: {
+	    openipctable_entry *open_entry =
+			(openipctable_entry *)array_get_entry_ptr(&global.open_table[fd_type_IPC],
+								  fd[i].opentable_idx);
+	    systemipctable_entry *system_entry =
+			(systemipctable_entry *)array_get_entry_ptr(&global.system_table[fd_type_IPC],
+								   open_entry->systemtable_idx);
+	    reporter_printf("%-8d %-10s  OPEN IDX:%-3d REF:%d",
+			    i + FDTABLE_BASE_FD,
+			    "IPC",
+			    fd[i].opentable_idx,
+			    open_entry->table_base.ref_count);
+	    reporter_printf("                   SYSTEM IDX:%-3d REF:%d",
+			    open_entry->systemtable_idx,
+			    system_entry->table_base.ref_count);
+	    reporter_printf("                           WB:%10X RB:%10X WP:%10d RP:%10d",
+			    (unsigned)open_entry->write_buffer,
+			    (unsigned)open_entry->read_buffer,
+			    open_entry->write_pos,
+			    open_entry->read_pos);
+	    break;
+	  }
+	  case fd_type_INVALID:
+	  default:
+	    reporter_printf("%-8d %s",
+			    i + FDTABLE_BASE_FD,
+			    "INVALID");
+	    break;
+	}
+      }
+}
+#endif

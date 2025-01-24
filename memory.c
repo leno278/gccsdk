@@ -1227,38 +1227,56 @@ allocator_munmap (armeabisupport_allocator_mmap *allocator,
         {
 	  if (page == current->start_page && page_count == current->end_page - current->start_page)
 	    {
-	      _kernel_oserror *err;
-	      app_object *app;
-	      if ((err = app_find(&app)) != NULL)
-		return err;
-
-	      fdtable_entry *fd;
-	      if ((fd = get_fdtable_entry(app, current->fd)) == NULL
-		  || !array_entry_is_in_use(&fd->base))
-		return armeabisupport_EBADF;
-
-	      /* Freeing whole block. Does it match a shared memory object? */
-	      if (fd->type == fd_type_SHM)
-		{
+	      if (current->fd != -1)
+	      {
+		LOG("%s: Found block with fd %d", __func__, current->fd);
 #if ENABLE_LOGGING
-		  openshmtable_entry *openshm_entry =
+		fdtable_log(NULL);
+		openshmtable_log();
+		systemshmtable_log();
+#endif
+
+		_kernel_oserror *err;
+		app_object *app;
+		if ((err = app_find(&app)) != NULL)
+		  return err;
+
+		fdtable_entry *fd;
+		if ((fd = get_fdtable_entry(app, current->fd)) == NULL
+		     || !array_entry_is_in_use(&fd->base))
+		  return armeabisupport_EBADF;
+
+		/* Freeing whole block. Does it match a shared memory object? */
+		if (fd->type == fd_type_SHM)
+		  {
+#if ENABLE_LOGGING
+		    openshmtable_entry *openshm_entry =
 				(openshmtable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHM],
-									  fd-opentable_idx);
-		  systemshmtable_entry *systemshm_entry =
+									  fd->opentable_idx);
+		    systemshmtable_entry *systemshm_entry =
 				(systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
 									    openshm_entry->systemtable_idx);
-		  TRACE_SHM("allocator_munmap: shared memory object %p, \"%s\", fd=%d, addr=%p, len=%d, ref=%d",
-			    systemshm_entry,
-			    systemshm_entry->name,
-			    current->fd,
-			    page_to_addr(&systemshm_entry->allocator->base, systemshm_entry->block->start_page),
-			    pages_to_bytes(systemshm_entry->block->end_page - systemshm_entry->block->start_page),
-			    systemshm_entry->ref_count);
+		    TRACE_SHM("allocator_munmap: shared memory object %p, \"%s\", fd=%d, addr=%p, len=%d, oref=%d, sref=%d",
+			      systemshm_entry,
+			      systemshm_entry->name,
+			      current->fd,
+			      page_to_addr(&systemshm_entry->allocator->base, systemshm_entry->block->start_page),
+			      pages_to_bytes(systemshm_entry->block->end_page - systemshm_entry->block->start_page),
+			      openshm_entry->table_base.ref_count,
+			      systemshm_entry->table_base.ref_count);
 #endif
-		  openshmtable_deref_entry(fd->opentable_idx);
-		  return NULL;
-		}
+		    /* This will only call allocator_munmap_block() when the final reference is
+		     * released.  */
+		    openshmtable_deref_entry(fd->opentable_idx);
 
+#if ENABLE_LOGGING
+		    fdtable_log(NULL);
+#endif
+		    return NULL;
+		  }
+	      }
+
+	      /* The following is just an inline version of what allocator_munmap_block() does.  */
 	      unmap_release_pages(&allocator->base, page, page_count);
 	      linklist_remove(&allocator->block_list, &current->link);
 	      rma_free(current);
@@ -1277,7 +1295,7 @@ allocator_munmap (armeabisupport_allocator_mmap *allocator,
 	    }
 	  else
 	    {
-	      /* Freeing the middle of a block. Creates a new block.  */
+	      /* Freeing the middle of a block creates a new block.  */
 	      /* This should actually return ENOMEM from munmap.  */
 	      _kernel_oserror *err;
 	      mmap_block *new_block;

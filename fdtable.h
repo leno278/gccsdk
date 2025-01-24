@@ -60,5 +60,6 @@ void fdtable_copy(app_object *dst_app, app_object *src_app);
 void fdtable_close_on_exec(app_object *app);
 
 void fdtable_print(app_object *app);
+void fdtable_log(app_object *app);
 
 #endif

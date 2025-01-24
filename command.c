@@ -14,6 +14,8 @@
 #include "memory.h"
 #include "fdtable.h"
 #include "filetable.h"
+#include "shmtable.h"
+#include "ipctable.h"
 #include "lock.h"
 #include "debug.h"
 
@@ -25,7 +27,7 @@ command_info(void)
        app;
        app = linklist_next_app_object (app))
     {
-      printf("App %X\n", app->ID);
+      printf("App (%s) %X\n", app->name, app->ID);
 
       fdtable_print(app);
 
@@ -46,8 +48,17 @@ command_info(void)
   printf("mmaps:\n");
   allocator_dump_all(&global.mmap_allocator_pool);
 
-  systemfiletable_print();
+  printf("FILE TABLES:\n");
   openfiletable_print();
+  systemfiletable_print();
+
+  printf("SHM TABLES:\n");
+  openshmtable_print();
+  systemshmtable_print();
+
+  printf("IPC TABLES:\n");
+  openipctable_print();
+  systemipctable_print();
 }
 
 _kernel_oserror *

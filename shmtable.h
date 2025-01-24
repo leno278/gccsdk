@@ -39,6 +39,8 @@ typedef struct _systemshmtable_entry
 
 _kernel_oserror *systemshmtable_open_shm(const char *name, int flags, int mode, int *);
 _kernel_oserror *systemshmtable_deref_shm(int systemtable_idx);
+void openshmtable_print(void);
+void systemshmtable_print(void);
 
 /* Return the index of the entry if it exists, otherwise ARRAY_INVALID_INDEX.  */
 int systemshmtable_shm_exists(const char *name);
@@ -51,5 +53,8 @@ systemshmtable_get_name(int systemtable_idx)
 									    systemtable_idx);
   return entry->name;
 }
+
+void openshmtable_log(void);
+void systemshmtable_log(void);
 
 #endif

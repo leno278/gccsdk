@@ -65,7 +65,7 @@ typedef struct _systemfiletable_entry
 } systemfiletable_entry;
 
 _kernel_oserror *systemfiletable_open_file(const char *file, int flags, int mode, int *);
-_kernel_oserror *systemfiletable_close_file(int filetable_idx);
+_kernel_oserror *systemfiletable_deref_entry(int filetable_idx);
 
 _kernel_oserror *
 systemfiletable_get_info(int filetable_idx,
@@ -116,5 +116,8 @@ openfiletable_get_filename(int opentable_idx)
   openfiletable_entry *entry = openfiletable_get_entry(opentable_idx);
   return systemfiletable_get_filename(entry->systemtable_idx);
 }
+
+void openfiletable_log(void);
+void systemfiletable_log(void);
 
 #endif

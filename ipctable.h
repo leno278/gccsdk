@@ -1,6 +1,6 @@
 /* ipctable.h
  *
- * Copyright 2024 GCCSDK Developers
+ * Copyright 2024,2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -44,6 +44,10 @@ typedef struct _systemipctable_entry
 } systemipctable_entry;
 
 _kernel_oserror *systemipctable_open_ipc(size_t size, int *idx_ret);
+_kernel_oserror *openipctable_deref_entry(int opentable_idx);
+_kernel_oserror *systemipctable_deref_ipc(int systemtable_idx);
+void openipctable_print(void);
+void systemipctable_print(void);
 
 static inline void ipc_write_int(openipctable_entry *ipc, int value)
 {
@@ -109,5 +113,8 @@ static inline void ipc_inc_and_align_write64(openipctable_entry *ipc, int len)
 {
   ipc->write_pos = align64(ipc->write_pos + len);
 }
+
+void openipctable_log(void);
+void systemipctable_log(void);
 
 #endif

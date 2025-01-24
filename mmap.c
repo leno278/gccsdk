@@ -594,18 +594,24 @@ armeabi_get_info(eabi_PTR addr,
 		 size_t *offset)
 {
   if (!is_page_aligned(addr))
-    return armeabisupport_EINVAL;
+    {
+      LOG("armeabi_get_info: Address %p not page aligned", addr);
+      return armeabisupport_EINVAL;
+    }
 
   armeabisupport_allocator_mmap *allocator = get_allocator(addr);
   if (!allocator)
     {
-      LOG("armeabi_get_info: Failed to find address in allocator pool");
-      return armeabisupport_ENOMEM;
+      LOG("armeabi_get_info: Failed to find address %p in allocator pool", addr);
+      return armeabisupport_EINVAL;
     }
 
   mmap_block *block = get_block(allocator, addr);
   if (!block)
-    return armeabisupport_ENOMEM;
+    {
+      LOG("armeabi_get_info: Failed to find address %p in allocator pool", addr);
+      return armeabisupport_EINVAL;
+    }
 
   *mmap_addr = page_to_addr(&allocator->base, block->start_page);
   *size = pages_to_bytes(block->end_page - block->start_page);

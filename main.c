@@ -73,7 +73,7 @@ app_new(app_object **app_ret, const char *name)
       fdtable_close_on_exec(app);
 
 #if ENABLE_LOGGING
-      fdtable_print(app);
+      fdtable_log(app);
 #endif
 
       global.parent = NULL;

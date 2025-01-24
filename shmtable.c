@@ -6,6 +6,7 @@
 
 #include "armeabisupport.h"
 #include "shmtable.h"
+#include "fdtable.h"
 #include "memory.h"
 #include "types.h"
 #include <string.h>
@@ -73,7 +74,7 @@ _kernel_oserror *systemshmtable_deref_shm(int systemtable_idx)
 
   systemshmtable_entry *entry = (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
 									    systemtable_idx);
-  if (array_entry_is_in_use(&entry->table_base.array_base))
+  if (entry && array_entry_is_in_use(&entry->table_base.array_base))
     {
       entry->table_base.ref_count--;
       LOG("%s:   Ref count now %d for system table entry %s (%X)", __func__,
@@ -130,20 +131,87 @@ _kernel_oserror *openshmtable_deref_entry(int opentable_idx)
 
   openshmtable_entry *openshm_entry = (openshmtable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHM],
 										opentable_idx);
-  openshm_entry->table_base.ref_count--;
-  LOG("%s:   Ref count now %d for open table entry", __func__, openshm_entry->table_base.ref_count);
-  if (openshm_entry->table_base.ref_count == 0)
+  if (openshm_entry && array_entry_is_in_use(&openshm_entry->table_base.array_base))
     {
-      LOG("%s:   Destroying open table entry", __func__);
-      systemshmtable_deref_shm(openshm_entry->systemtable_idx);
-      openshm_entry->systemtable_idx = ARRAY_INVALID_INDEX;
-      array_entry_mark_unused(&openshm_entry->table_base.array_base);
+      openshm_entry->table_base.ref_count--;
+      LOG("%s:   Open table ref count now %d for open table entry", __func__, openshm_entry->table_base.ref_count);
+      if (openshm_entry->table_base.ref_count == 0)
+	{
+	  systemshmtable_deref_shm(openshm_entry->systemtable_idx);
+	  openshm_entry->systemtable_idx = ARRAY_INVALID_INDEX;
+	  array_entry_mark_unused(&openshm_entry->table_base.array_base);
+	}
     }
-
-#if ENABLE_LOGGING
-//  systemfiletable_print();
-//  openfiletable_print();
-#endif
 
   return NULL;
 }
+
+void openshmtable_print(void)
+{
+  array_t *table = &global.open_table[fd_type_SHM];
+  openshmtable_entry *entry = (openshmtable_entry *)table->entries;
+
+  printf("%-4s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF");
+  for (int i = 0; i < table->num_entries; i++)
+    {
+      if (array_entry_is_in_use(&entry[i].table_base.array_base))
+	{
+	  printf("%-4d %-12d %-12d %s\n",
+		 i,
+		 entry[i].systemtable_idx,
+		 entry[i].table_base.ref_count,
+		 systemshmtable_get_name(entry[i].systemtable_idx));
+	}
+    }
+}
+
+void systemshmtable_print(void)
+{
+  array_t *table = &global.system_table[fd_type_SHM];
+  systemshmtable_entry *entry = (systemshmtable_entry *)table->entries;
+
+  printf("%-4s %-12s %s\n", "IDX", "REF","NAME");
+  for (int i = 0; i < table->num_entries; i++)
+    {
+      if (entry[i].table_base.array_base.in_use)
+	{
+	  printf("%-4d %-12d %s\n", i, entry[i].table_base.ref_count, entry[i].name);
+	}
+    }
+}
+
+#if ENABLE_LOGGING
+void openshmtable_log(void)
+{
+  array_t *table = &global.open_table[fd_type_SHM];
+  openshmtable_entry *entry = (openshmtable_entry *)table->entries;
+
+  reporter_printf("%-4s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF");
+  for (int i = 0; i < table->num_entries; i++)
+    {
+      if (array_entry_is_in_use(&entry[i].table_base.array_base))
+	{
+	  reporter_printf("%-4d %-12d %-12d %s\n",
+		 i,
+		 entry[i].systemtable_idx,
+		 entry[i].table_base.ref_count,
+		 systemshmtable_get_name(entry[i].systemtable_idx));
+	}
+    }
+}
+
+void systemshmtable_log(void)
+{
+  array_t *table = &global.system_table[fd_type_SHM];
+  systemshmtable_entry *entry = (systemshmtable_entry *)table->entries;
+
+  reporter_printf("%-4s %-12s %s\n", "IDX", "REF","NAME");
+  for (int i = 0; i < table->num_entries; i++)
+    {
+      if (entry[i].table_base.array_base.in_use)
+	{
+	  reporter_printf("%-4d %-12d %s\n", i, entry[i].table_base.ref_count, entry[i].name);
+	}
+    }
+}
+#endif

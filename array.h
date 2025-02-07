@@ -44,7 +44,7 @@ static inline void array_dtor(array_t *this)
 
 static inline array_entry_base *array_get_entry_ptr(array_t *this, int index)
 {
-  return index >= 0
+  return index >= 0 && index < this->num_entries
 	 ? (array_entry_base *)((unsigned)this->entries + (index * this->entry_size))
 	 : NULL;
 }

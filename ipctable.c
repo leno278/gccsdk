@@ -7,6 +7,7 @@
 #include "armeabisupport.h"
 #include "memory.h"
 #include "ipctable.h"
+#include "opentable.h"
 #include "fdtable.h"
 #include "mmap.h"
 
@@ -16,26 +17,33 @@
 #define ENABLE_LOGGING 0
 #include "log.h"
 
-_kernel_oserror *openipctable_add_entry(int systemtable_idx,
-					eabi_PTR write_buffer,
-					eabi_PTR read_buffer,
-					size_t buffer_size,
-					int *idx_ret)
+static void opentable_log_ipc_entry(opentable_entry *ot_entry);
+
+static opentable_methods ipc_methods =
 {
-  array_t *ipctable = &global.open_table[fd_type_IPC];
+  systemipctable_deref_ipc,
+  opentable_unmap_ipc,
+  opentable_log_ipc_entry
+};
 
+_kernel_oserror *opentable_add_ipc(int systemtable_idx,
+				   eabi_PTR write_buffer,
+				   eabi_PTR read_buffer,
+				   size_t buffer_size,
+				   int *idx_ret)
+{
   _kernel_oserror *err;
-  if ((err = array_alloc_entry(ipctable, idx_ret)) == NULL)
+  if ((err = opentable_add_entry(opentable_type_IPC,
+				 systemtable_idx,
+				 &ipc_methods,
+				 idx_ret)) == NULL)
     {
-      openipctable_entry *entry = (openipctable_entry *)array_get_entry_ptr(ipctable, *idx_ret);
+      opentable_entry *entry = opentable_get_entry(*idx_ret);
 
-      entry->systemtable_idx = systemtable_idx;
-      entry->table_base.ref_count = 1;
-      entry->read_pos = entry->write_pos = 0;
-
-      entry->write_buffer = write_buffer;
-      entry->read_buffer = read_buffer;
-      entry->buffer_size = buffer_size;
+      entry->ipc.read_pos = entry->ipc.write_pos = 0;
+      entry->ipc.write_buffer = write_buffer;
+      entry->ipc.read_buffer = read_buffer;
+      entry->ipc.buffer_size = buffer_size;
     }
 
   if (err)
@@ -62,34 +70,9 @@ _kernel_oserror *systemipctable_open_ipc(size_t size, int *idx_ret)
   return err;
 }
 
-_kernel_oserror *openipctable_deref_entry(int opentable_idx)
-{
-  TRACE("%s: IPC opentable_idx=%d", __func__, opentable_idx);
-
-  openipctable_entry *open_entry = (openipctable_entry *)array_get_entry_ptr(&global.open_table[fd_type_IPC],
-									     opentable_idx);
-  open_entry->table_base.ref_count--;
-  LOG("%s:   Open table ref count now %d for IPC entry index %d",
-      __func__, open_entry->table_base.ref_count, opentable_idx);
-  if (open_entry->table_base.ref_count == 0)
-    {
-      systemipctable_deref_ipc(open_entry->systemtable_idx);
-      open_entry->systemtable_idx = ARRAY_INVALID_INDEX;
-      array_entry_mark_unused(&open_entry->table_base.array_base);
-    }
-
-#if ENABLE_LOGGING
-  openipctable_log();
-  systemipctable_log();
-#endif
-
-  return NULL;
-}
-
 _kernel_oserror *systemipctable_deref_ipc(int systemtable_idx)
 {
   TRACE("%s: IPC systemtable index=%d", __func__, systemtable_idx);
-
   systemipctable_entry *entry = (systemipctable_entry *)array_get_entry_ptr(&global.system_table[fd_type_IPC],
 									    systemtable_idx);
   if (!array_entry_is_in_use(&entry->table_base.array_base))
@@ -112,32 +95,36 @@ _kernel_oserror *systemipctable_deref_ipc(int systemtable_idx)
       array_entry_mark_unused(&entry->table_base.array_base);
     }
 
-#if ENABLE_LOGGING
-  fdtable_log(NULL);
-#endif
+  return NULL;
+}
 
+_kernel_oserror *opentable_unmap_ipc(armeabisupport_allocator_mmap *allocator,
+				     mmap_block *block)
+{
+  /* NOOP  */
+  LOG("%s: NOOP", __func__);
   return NULL;
 }
 
 void openipctable_print(void)
 {
-  array_t *table = &global.open_table[fd_type_IPC];
-  openipctable_entry *entry = (openipctable_entry *)table->entries;
+  array_t *table = &global.open_table;
+  opentable_entry *entry = (opentable_entry *)table->entries;
 
   printf("%-4s %-10s %-3s %10s %10s %10s %10s\n",
 		 "IDX", "SYSIDX", "REF", "WB", "RB", "WP", "RP");
   for (int i = 0; i < table->num_entries; i++)
     {
-      if (array_entry_is_in_use(&entry[i].table_base.array_base))
+      if (array_entry_is_in_use(&entry[i].array_base) && entry[i].type == opentable_type_IPC)
 	{
 	  printf("%-4d %-10s %-3d %10X %10X %10d %10d\n",
 		 i,
 		 "IPC",
-		 entry->table_base.ref_count,
-		 (unsigned)entry->write_buffer,
-		 (unsigned)entry->read_buffer,
-		 entry->write_pos,
-		 entry->read_pos);
+		 entry[i].ref_count,
+		 (unsigned)entry[i].ipc.write_buffer,
+		 (unsigned)entry[i].ipc.read_buffer,
+		 entry[i].ipc.write_pos,
+		 entry[i].ipc.read_pos);
 	}
     }
 }
@@ -162,27 +149,47 @@ void systemipctable_print(void)
     }
 }
 
+static void opentable_log_ipc_entry(opentable_entry *ot_entry)
+{
+  int index = opentable_get_index(ot_entry);
+  systemipctable_entry *system_entry =
+	    (systemipctable_entry *)array_get_entry_ptr(&global.system_table[fd_type_IPC],
+							ot_entry->systemtable_idx);
+  reporter_printf("%4d %4s %4d %6d",
+		  index,
+		  "IPC",
+		  ot_entry->ref_count,
+		  ot_entry->systemtable_idx);
+  reporter_printf("                   SYSTEM: REF:%3d OPP:%3d WB:%9X RB:%9X WP:%10d RP:%10d",
+		  system_entry->table_base.ref_count,
+		  ot_entry->ipc.opentable_oppend_idx,
+		  (unsigned)ot_entry->ipc.write_buffer,
+		  (unsigned)ot_entry->ipc.read_buffer,
+		  ot_entry->ipc.write_pos,
+		  ot_entry->ipc.read_pos);
+}
+
 #if ENABLE_LOGGING
 void openipctable_log(void)
 {
-  array_t *table = &global.open_table[fd_type_IPC];
-  openipctable_entry *entry = (openipctable_entry *)table->entries;
+  array_t *table = &global.open_table;
+  opentable_entry *entry = (opentable_entry *)table->entries;
 
   reporter_printf("%4s %6s %6s %4s %10s %10s %10s %10s\n",
 		  "IDX", "SYSIDX", "OPPIDX", "REF", "WB", "RB", "WP", "RP");
   for (int i = 0; i < table->num_entries; i++)
     {
-      if (array_entry_is_in_use(&entry[i].table_base.array_base))
+      if (array_entry_is_in_use(&entry[i].array_base) && entry[i].type == opentable_type_IPC)
 	{
 	  reporter_printf("%4d %6d %6d %4d %10X %10X %10d %10d\n",
 			  i,
 			  entry[i].systemtable_idx,
-			  entry[i].openipctable_oppend_idx,
-			  entry[i].table_base.ref_count,
-			  entry[i].write_buffer,
-			  entry[i].read_buffer,
-			  entry[i].write_pos,
-			  entry[i].read_pos);
+			  entry[i].ipc.opentable_oppend_idx,
+			  entry[i].ref_count,
+			  entry[i].ipc.write_buffer,
+			  entry[i].ipc.read_buffer,
+			  entry[i].ipc.write_pos,
+			  entry[i].ipc.read_pos);
 	}
     }
 }

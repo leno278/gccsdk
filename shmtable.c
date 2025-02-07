@@ -6,6 +6,7 @@
 
 #include "armeabisupport.h"
 #include "shmtable.h"
+#include "opentable.h"
 #include "fdtable.h"
 #include "memory.h"
 #include "types.h"
@@ -17,6 +18,15 @@
 
 #define ENABLE_LOGGING 0
 #include "log.h"
+
+static void opentable_log_shm_entry(opentable_entry *ot_entry);
+
+static opentable_methods shm_methods =
+{
+  systemshmtable_deref_shm,
+  opentable_unmap_shm,
+  opentable_log_shm_entry
+};
 
 /* See if we already have a shared memory object with this name open and return
  * the index if so, otherwise ARRAY_INVALID_INDEX.  */
@@ -32,7 +42,7 @@ int systemshmtable_shm_exists(const char *name)
   return ARRAY_INVALID_INDEX;
 }
 
-_kernel_oserror *systemshmtable_open_shm(const char *name, int flags, int mode, int *idx_ret)
+_kernel_oserror *systemshmtable_open_shm(const char *name, int oflag, int mode, int *idx_ret)
 {
   TRACE("%s: name=%s", __func__, name);
 
@@ -40,15 +50,29 @@ _kernel_oserror *systemshmtable_open_shm(const char *name, int flags, int mode, 
   int entry_idx = systemshmtable_shm_exists(name);
   if (entry_idx != ARRAY_INVALID_INDEX)
     {
+      /* Fail if O_CREAT and O_EXCL are set and the named shared memory object already exists.  */
+      if ((oflag & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL))
+	{
+	  LOG("shm_open: \"%s\" already exists, but O_CREAT and O_EXCL are set", name);
+	  return armeabisupport_EEXIST;
+	}
+
       systemshmtable_entry *entry = (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
 										entry_idx);
       entry->table_base.ref_count++;
       *idx_ret = entry_idx;
       LOG("%s: Found existing entry for shm object %s", __func__, name);
-      LOG("%s:   at index %d, ref count now %d", __func__, entry_idx, entry->table_base.ref_count);
+      LOG("%s:   at system table index %d, ref count now %d", __func__, entry_idx, entry->table_base.ref_count);
     }
   else
     {
+      /* Fail if O_CREAT is not set and the named shared memory object does not exist.  */
+      if (!(oflag & O_CREAT))
+	{
+	  LOG("shm_open: \"%s\" does not exist and O_CREATE not set", name);
+	  return armeabisupport_ENOENT;
+	}
+
       LOG("%s: No entry found for shm object %s", __func__, name);
       if ((err = array_alloc_entry(&global.system_table[fd_type_SHM], idx_ret)) == NULL)
 	{
@@ -63,7 +87,7 @@ _kernel_oserror *systemshmtable_open_shm(const char *name, int flags, int mode, 
 	}
     }
 
-  LOG("%s: Return index %d for shm object %s", __func__, *idx_ret, name);
+  LOG("%s: Return system table index %d for shm object %s", __func__, *idx_ret, name);
 
   return err;
 }
@@ -99,25 +123,32 @@ _kernel_oserror *systemshmtable_deref_shm(int systemtable_idx)
 	  return NULL;
 	}
     }
+  else
+    {
+      LOG("%s: FAIL: attempt to deref system shm entry %d that is no longer valid",
+	  __func__, systemtable_idx);
+    }
 
   return armeabisupport_EINVAL;
 }
 
-_kernel_oserror *openshmtable_add_entry(int systemtable_idx, int flags, int mode, int *idx_ret)
+_kernel_oserror *opentable_add_shm(int systemtable_idx,
+				   int flags,
+				   int mode,
+				   int *idx_ret)
 {
   TRACE("%s: systemtable_idx=%d", __func__, systemtable_idx);
 
-  array_t *shmtable = &global.open_table[fd_type_SHM];
-
   _kernel_oserror *err;
-  if ((err = array_alloc_entry(shmtable, idx_ret)) == NULL)
+  if ((err = opentable_add_entry(opentable_type_SHM,
+				 systemtable_idx,
+				 &shm_methods,
+				 idx_ret)) == NULL)
     {
-      openshmtable_entry *entry = (openshmtable_entry *)array_get_entry_ptr(shmtable, *idx_ret);
+      opentable_entry *entry = opentable_get_entry(*idx_ret);
 
-      entry->systemtable_idx = systemtable_idx;
-      entry->table_base.ref_count = 1;
-      entry->flags = flags;
-      entry->mode = mode;
+      entry->shm.flags = flags;
+      entry->shm.mode = mode;
     }
   else
     LOG("%s:     err=%s", __func__, err->errmess);
@@ -125,42 +156,51 @@ _kernel_oserror *openshmtable_add_entry(int systemtable_idx, int flags, int mode
   return err;
 }
 
-_kernel_oserror *openshmtable_deref_entry(int opentable_idx)
+_kernel_oserror *opentable_unmap_shm(armeabisupport_allocator_mmap *allocator,
+				     mmap_block *block)
 {
-  TRACE("%s: opentable_idx=%d", __func__, opentable_idx);
+  TRACE("%s: opentable_idx=%d", __func__, block->opentable_idx);
 
-  openshmtable_entry *openshm_entry = (openshmtable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHM],
-										opentable_idx);
-  if (openshm_entry && array_entry_is_in_use(&openshm_entry->table_base.array_base))
-    {
-      openshm_entry->table_base.ref_count--;
-      LOG("%s:   Open table ref count now %d for open table entry", __func__, openshm_entry->table_base.ref_count);
-      if (openshm_entry->table_base.ref_count == 0)
-	{
-	  systemshmtable_deref_shm(openshm_entry->systemtable_idx);
-	  openshm_entry->systemtable_idx = ARRAY_INVALID_INDEX;
-	  array_entry_mark_unused(&openshm_entry->table_base.array_base);
-	}
-    }
+#if ENABLE_LOGGING
+  opentable_entry *ot_entry = opentable_get_entry(block->opentable_idx);
+  if (!ot_entry || !array_entry_is_in_use(&ot_entry->array_base))
+    return armeabisupport_EBADF;
+
+  systemshmtable_entry *st_entry =
+		(systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
+							    ot_entry->systemtable_idx);
+  LOG("%s: shared memory object %p, \"%s\", open table index %d, addr=%p, len=%d, oref=%d, sref=%d",
+       __func__,
+       st_entry,
+       st_entry->name,
+       block->opentable_idx,
+       page_to_addr(&st_entry->allocator->base, st_entry->block->start_page),
+       pages_to_bytes(st_entry->block->end_page - st_entry->block->start_page),
+       ot_entry->ref_count,
+       st_entry->table_base.ref_count);
+#endif
+
+  /* This will only call allocator_munmap_block() when the final reference is released.  */
+  opentable_deref_entry(block->opentable_idx);
 
   return NULL;
 }
 
 void openshmtable_print(void)
 {
-  array_t *table = &global.open_table[fd_type_SHM];
-  openshmtable_entry *entry = (openshmtable_entry *)table->entries;
+  array_t *table = &global.open_table;
+  opentable_entry *ot_entry = (opentable_entry *)table->entries;
 
   printf("%-4s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF");
   for (int i = 0; i < table->num_entries; i++)
     {
-      if (array_entry_is_in_use(&entry[i].table_base.array_base))
+      if (ot_entry[i].type == opentable_type_SHM && array_entry_is_in_use(&ot_entry[i].array_base))
 	{
 	  printf("%-4d %-12d %-12d %s\n",
 		 i,
-		 entry[i].systemtable_idx,
-		 entry[i].table_base.ref_count,
-		 systemshmtable_get_name(entry[i].systemtable_idx));
+		 ot_entry[i].systemtable_idx,
+		 ot_entry[i].ref_count,
+		 systemshmtable_get_name(ot_entry[i].systemtable_idx));
 	}
     }
 }
@@ -180,22 +220,39 @@ void systemshmtable_print(void)
     }
 }
 
+static void opentable_log_shm_entry(opentable_entry *ot_entry)
+{
+  int index = opentable_get_index(ot_entry);
+  systemshmtable_entry *system_entry =
+	    (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
+							ot_entry->systemtable_idx);
+  reporter_printf("%4d %4s %4d %6d",
+		  index,
+		  "SHM",
+		  ot_entry->ref_count,
+		  ot_entry->systemtable_idx);
+  reporter_printf("                   SYSTEM: REF:%3d ADDR:%10X NAME:%s",
+		  system_entry->table_base.ref_count,
+		  page_to_addr(&system_entry->allocator->base, system_entry->block->start_page),
+		  system_entry->name);
+}
+
 #if ENABLE_LOGGING
 void openshmtable_log(void)
 {
-  array_t *table = &global.open_table[fd_type_SHM];
-  openshmtable_entry *entry = (openshmtable_entry *)table->entries;
+  array_t *table = &global.open_table;
+  opentable_entry *ot_entry = (opentable_entry *)table->entries;
 
   reporter_printf("%-4s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF");
   for (int i = 0; i < table->num_entries; i++)
     {
-      if (array_entry_is_in_use(&entry[i].table_base.array_base))
+      if (ot_entry[i].type == opentable_type_SHM && array_entry_is_in_use(&ot_entry[i].array_base))
 	{
 	  reporter_printf("%-4d %-12d %-12d %s\n",
 		 i,
-		 entry[i].systemtable_idx,
-		 entry[i].table_base.ref_count,
-		 systemshmtable_get_name(entry[i].systemtable_idx));
+		 ot_entry[i].systemtable_idx,
+		 ot_entry[i].ref_count,
+		 systemshmtable_get_name(ot_entry[i].systemtable_idx));
 	}
     }
 }
@@ -205,12 +262,17 @@ void systemshmtable_log(void)
   array_t *table = &global.system_table[fd_type_SHM];
   systemshmtable_entry *entry = (systemshmtable_entry *)table->entries;
 
-  reporter_printf("%-4s %-12s %s\n", "IDX", "REF","NAME");
+  reporter_printf("%4s %4s %10s %10s %s\n", "IDX", "REF", "ADDR", "SIZE", "NAME");
   for (int i = 0; i < table->num_entries; i++)
     {
       if (entry[i].table_base.array_base.in_use)
 	{
-	  reporter_printf("%-4d %-12d %s\n", i, entry[i].table_base.ref_count, entry[i].name);
+	  reporter_printf("%4d %4d %10X %10X %s\n",
+			  i,
+			  entry[i].table_base.ref_count,
+			  page_to_addr(&entry[i].allocator->base, entry[i].block->start_page),
+			  pages_to_bytes(entry[i].block->end_page - entry[i].block->start_page),
+			  entry[i].name);
 	}
     }
 }

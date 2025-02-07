@@ -53,4 +53,5 @@ error-identifiers: armeabisupport_bad_reason("Unknown ARMEABISupport SWI reason 
 		   armeabisupport_EBADF("EBADF: Not a valid file descriptor"),
 		   armeabisupport_ENOMEM("ENOMEM: No memory is available"),
 		   armeabisupport_EOPSYS("EOPSYS: RISC OS system error"),
-		   armeabisupport_EOVERFLOW("EOVERFLOW: Value too large for defined data type")
+		   armeabisupport_EOVERFLOW("EOVERFLOW: Value too large for defined data type"),
+		   armeabisupport_EIO("EIO: Input/Output error"),

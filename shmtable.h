@@ -11,18 +11,14 @@
 #include "types.h"
 #include <swi.h>
 
-typedef struct _openshmtable_entry
+typedef struct _openshmtable
 {
-  table_entry_base table_base;
-
-  int systemtable_idx;
   int flags;
   int mode;
 
-} openshmtable_entry;
+} openshmtable;
 
 _kernel_oserror *openshmtable_add_entry(int systemtable_idx, int flags, int mode, int *idx_ret);
-_kernel_oserror *openshmtable_deref_entry(int opentable_idx);
 
 typedef struct _systemshmtable_entry
 {
@@ -39,6 +35,8 @@ typedef struct _systemshmtable_entry
 
 _kernel_oserror *systemshmtable_open_shm(const char *name, int flags, int mode, int *);
 _kernel_oserror *systemshmtable_deref_shm(int systemtable_idx);
+_kernel_oserror *opentable_unmap_shm(armeabisupport_allocator_mmap *allocator,
+				     mmap_block *block);
 void openshmtable_print(void);
 void systemshmtable_print(void);
 

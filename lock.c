@@ -6,6 +6,7 @@
 
 #include "armeabisupport.h"
 #include "filetable.h"
+#include "opentable.h"
 #include "lock.h"
 #include <stdbool.h>
 #include <kernel.h>
@@ -61,7 +62,7 @@ void filelocklist_dtor(filelock_list *this)
  *
  */
 bool
-filelocklist_get_lock(filelock_list *list, int openfiletable_idx, off_t *start, off_t *end, int *type)
+filelocklist_get_lock(filelock_list *list, int opentable_idx, off_t *start, off_t *end, int *type)
 {
   TRACE("%s: start=%ld, end=%ld, type=%s, file=%s",
 	__func__, *start, *end, __lock_type(*type),
@@ -71,30 +72,32 @@ filelocklist_get_lock(filelock_list *list, int openfiletable_idx, off_t *start, 
   filelocklist_lslocks();
 #endif
 
-  openfiletable_entry *file = openfiletable_get_entry(openfiletable_idx);
+  opentable_entry *ot_entry = opentable_get_entry(opentable_idx);
+  if (ot_entry->type != opentable_type_FILE)
+    return false;
 
   /* A request for a shared lock shall fail if the file descriptor was not opened with read access.  */
-  if (*type == F_RDLCK && (file->flags & O_ACCMODE) == O_WRONLY)
+  if (*type == F_RDLCK && (ot_entry->file.flags & O_ACCMODE) == O_WRONLY)
     {
       LOG("%s: FAIL - request for shared lock on write only fd", __func__);
       return false;
     }
 
   /* A request for an exclusive lock shall fail if the file descriptor was not opened with write access.  */
-  if (*type == F_WRLCK && (file->flags & O_ACCMODE) == O_RDONLY)
+  if (*type == F_WRLCK && (ot_entry->file.flags & O_ACCMODE) == O_RDONLY)
     {
       LOG("%s: FAIL - request for exclusive lock on read only fd", __func__);
       return false;
     }
 
   off_t file_len;
-  if ((systemfiletable_get_file_length(file->systemtable_idx, &file_len)) != NULL)
+  if ((systemfiletable_get_file_length(ot_entry->systemtable_idx, &file_len)) != NULL)
     return false;
   off_t real_end = (*end == 0) ? file_len : *end;
 
-  for (filelock *lock = filelocklist_get_first(&file->locks);
+  for (filelock *lock = filelocklist_get_first(&ot_entry->file.locks);
 		 lock;
-		 lock = filelocklist_get_next(&file->locks, lock))
+		 lock = filelocklist_get_next(&ot_entry->file.locks, lock))
     {
       off_t lock_end = (lock->end == 0) ? file_len : lock->end;
       LOG("%s: trying lock %p start=%ld, end=%ld, type=%s",
@@ -246,23 +249,29 @@ static filelock *alloc_lock(app_object *app,
  * lock or an exclusive lock on any portion of the protected area.
 */
 _kernel_oserror *
-filelocklist_add_lock(app_object *this_app, int openfiletable_idx, off_t start, off_t end, int type)
+filelocklist_add_lock(app_object *this_app, int opentable_idx, off_t start, off_t end, int type)
 {
+  opentable_entry *ot_entry = opentable_get_entry(opentable_idx);
+  if (ot_entry->type != opentable_type_FILE)
+    {
+      LOG("%s: FAIL - open table index %d is not a file", __func__);
+      return armeabisupport_EBADF;
+    }
+
   TRACE("%s: start=%ld, end=%ld, type=%s, file=%s",
 	__func__, start, end, __lock_type(type),
-	openfiletable_get_filename(openfiletable_idx));
+	openfiletable_get_filename(opentable_idx));
 
-  openfiletable_entry *file = openfiletable_get_entry(openfiletable_idx);
 
   /* A request for a shared lock shall fail if the file descriptor was not opened with read access.  */
-  if (type == F_RDLCK && (file->flags & O_ACCMODE) == O_WRONLY)
+  if (type == F_RDLCK && (ot_entry->file.flags & O_ACCMODE) == O_WRONLY)
     {
       LOG("%s: FAIL - request for shared lock on write only fd", __func__);
       return armeabisupport_EBADF;
     }
 
   /* A request for an exclusive lock shall fail if the file descriptor was not opened with write access.  */
-  if (type == F_WRLCK && (file->flags & O_ACCMODE) == O_RDONLY)
+  if (type == F_WRLCK && (ot_entry->file.flags & O_ACCMODE) == O_RDONLY)
     {
       LOG("%s: FAIL - request for exclusive lock on read only fd", __func__);
       return armeabisupport_EBADF;
@@ -271,27 +280,27 @@ filelocklist_add_lock(app_object *this_app, int openfiletable_idx, off_t start, 
   filelock *new_lock;
 
   /* If this is the first lock, then fast track it.  */
-  if (file->locks.first == INVALID_LINK)
+  if (ot_entry->file.locks.first == INVALID_LINK)
     {
-      if ((new_lock = alloc_lock(this_app, &file->locks, openfiletable_idx, start, end, type)) == NULL)
+      if ((new_lock = alloc_lock(this_app, &ot_entry->file.locks, opentable_idx, start, end, type)) == NULL)
 	return armeabisupport_ENOMEM;
-      lock_list_add_to_end(&file->locks, new_lock);
+      lock_list_add_to_end(&ot_entry->file.locks, new_lock);
       LOG("%s: New (first) lock added", __func__);
       return NULL;
     }
 
   /* At this point, there will always be at least one lock in the list because of the fast track above.  */
   off_t file_len;
-  _kernel_oserror *err = systemfiletable_get_file_length(file->systemtable_idx, &file_len);
+  _kernel_oserror *err = systemfiletable_get_file_length(ot_entry->systemtable_idx, &file_len);
   if (err)
     return err;
 
   off_t real_end = (end == 0) ? file_len : end;
 
   /* Check if any other apps have a conflicting lock.  */
-  for (filelock *conflict_lock = filelocklist_get_first(&file->locks);
+  for (filelock *conflict_lock = filelocklist_get_first(&ot_entry->file.locks);
        conflict_lock;
-       conflict_lock = filelocklist_get_next(&file->locks, conflict_lock))
+       conflict_lock = filelocklist_get_next(&ot_entry->file.locks, conflict_lock))
     {
       off_t list_end = (conflict_lock->end == 0) ? file_len : conflict_lock->end;
       if (start >= conflict_lock->start && start < list_end)
@@ -311,10 +320,10 @@ filelocklist_add_lock(app_object *this_app, int openfiletable_idx, off_t start, 
     }
 
   /* If we get here, then there is no conflict and we can set the lock.  */
-  filelock *list_lock = filelocklist_get_first(&file->locks);
+  filelock *list_lock = filelocklist_get_first(&ot_entry->file.locks);
   while (list_lock)
     {
-      filelock *next_lock = filelocklist_get_next(&file->locks, list_lock);
+      filelock *next_lock = filelocklist_get_next(&ot_entry->file.locks, list_lock);
 
       if (list_lock->owner != this_app)
 	{
@@ -334,7 +343,7 @@ filelocklist_add_lock(app_object *this_app, int openfiletable_idx, off_t start, 
 	      LOG("%s: start covered by same lock type %ld->%ld", __func__, list_lock->start, list_end);
 	      /* Same type, adjust new lock to cover this one and remove the old one.  */
 	      start = list_lock->start;
-	      lock_list_remove(&file->locks, list_lock);
+	      lock_list_remove(&ot_entry->file.locks, list_lock);
 	      array_entry_mark_unused(&list_lock->base);
 	    }
 	  else
@@ -348,7 +357,7 @@ filelocklist_add_lock(app_object *this_app, int openfiletable_idx, off_t start, 
       else if (start <= list_lock->start && real_end >= list_end)
 	{
 	  LOG("%s: wholly covered by lock %ld->%ld", __func__, list_lock->start, list_end);
-	  lock_list_remove(&file->locks, list_lock);
+	  lock_list_remove(&ot_entry->file.locks, list_lock);
 	  array_entry_mark_unused(&list_lock->base);
 	}
       /* Find a lock that may overlap the end of the proposed lock.  */
@@ -359,7 +368,7 @@ filelocklist_add_lock(app_object *this_app, int openfiletable_idx, off_t start, 
 	      /* Same type, adjust new lock to cover this one and remove the old one.  */
 	      LOG("%s: end covered by same lock type %ld->%ld", __func__, list_lock->start, list_end);
 	      end = list_lock->end;
-	      lock_list_remove(&file->locks, list_lock);
+	      lock_list_remove(&ot_entry->file.locks, list_lock);
 	      array_entry_mark_unused(&list_lock->base);
 	    }
 	  else
@@ -373,16 +382,16 @@ filelocklist_add_lock(app_object *this_app, int openfiletable_idx, off_t start, 
     }
 
   /* Find correct place in list based on the start offset of the lock.  */
-  for (list_lock = filelocklist_get_first(&file->locks);
+  for (list_lock = filelocklist_get_first(&ot_entry->file.locks);
        list_lock && start >= list_lock->start;
-       list_lock = filelocklist_get_next(&file->locks, list_lock))
+       list_lock = filelocklist_get_next(&ot_entry->file.locks, list_lock))
     /* */;
 
-  if ((new_lock = alloc_lock(this_app, &file->locks, openfiletable_idx, start, end, type)) == NULL)
+  if ((new_lock = alloc_lock(this_app, &ot_entry->file.locks, opentable_idx, start, end, type)) == NULL)
     return armeabisupport_ENOMEM;
 
   /* list_lock can be NULL, in which case, it's added to the end of the list.  */
-  lock_list_add_before(&file->locks, list_lock, new_lock);
+  lock_list_add_before(&ot_entry->file.locks, list_lock, new_lock);
 
 #if ENABLE_LOGGING
   filelocklist_lslocks();
@@ -392,16 +401,16 @@ filelocklist_add_lock(app_object *this_app, int openfiletable_idx, off_t start, 
 }
 
 _kernel_oserror *
-filelocklist_remove_lock(app_object *this_app, int openfiletable_idx, off_t start, off_t end)
+filelocklist_remove_lock(app_object *this_app, int opentable_idx, off_t start, off_t end)
 {
   TRACE("%s: start=%ld, end=%ld, file=%s",
 	__func__, start, end,
 	openfiletable_get_filename(openfiletable_idx));
 
-  openfiletable_entry *file = openfiletable_get_entry(openfiletable_idx);
+  opentable_entry *ot_entry = opentable_get_entry(opentable_idx);
 
   off_t file_len;
-  _kernel_oserror *err = systemfiletable_get_file_length(file->systemtable_idx, &file_len);
+  _kernel_oserror *err = systemfiletable_get_file_length(ot_entry->systemtable_idx, &file_len);
   if (err)
     return err;
 
@@ -414,10 +423,10 @@ filelocklist_remove_lock(app_object *this_app, int openfiletable_idx, off_t star
   LOG("%s: real_end=%ld", __func__, real_end);
 
   filelock *list_lock;
-  list_lock = filelocklist_get_first(&file->locks);
+  list_lock = filelocklist_get_first(&ot_entry->file.locks);
   while (list_lock)
     {
-      filelock *next_lock = filelocklist_get_next(&file->locks, list_lock);
+      filelock *next_lock = filelocklist_get_next(&ot_entry->file.locks, list_lock);
 
       if (list_lock->owner != this_app)
 	{
@@ -437,7 +446,7 @@ filelocklist_remove_lock(app_object *this_app, int openfiletable_idx, off_t star
       else if (start <= list_lock->start && real_end >= list_end)
 	{
 	  LOG("%s: unlock region covers all of lock %ld->%ld", __func__, list_lock->start, list_end);
-	  lock_list_remove(&file->locks, list_lock);
+	  lock_list_remove(&ot_entry->file.locks, list_lock);
 	  array_entry_mark_unused(&list_lock->base);
 	}
       /* Find a lock that may overlap the end of the unlock region.  */
@@ -456,18 +465,20 @@ filelocklist_remove_lock(app_object *this_app, int openfiletable_idx, off_t star
   return NULL;
 }
 
-void filelocklist_clear_locks(app_object *this_app, int openfiletable_idx)
+void filelocklist_clear_locks(app_object *this_app, int opentable_idx)
 {
-  openfiletable_entry *file = openfiletable_get_entry(openfiletable_idx);
+  opentable_entry *entry = opentable_get_entry(opentable_idx);
+  if (entry->type != opentable_type_FILE)
+    return;
 
-  filelock *list_lock = filelocklist_get_first(&file->locks);
+  filelock *list_lock = filelocklist_get_first(&entry->file.locks);
   while (list_lock)
     {
-      filelock *next_lock = filelocklist_get_next(&file->locks, list_lock);
+      filelock *next_lock = filelocklist_get_next(&entry->file.locks, list_lock);
 
       if (list_lock->owner == this_app)
 	{
-	  lock_list_remove(&file->locks, list_lock);
+	  lock_list_remove(&entry->file.locks, list_lock);
 	  array_entry_mark_unused(&list_lock->base);
 	}
 
@@ -482,13 +493,13 @@ filelocklist_lslocks(void)
 
   printf("MODE      START        END PATH\n");
   LOG("MODE      START        END PATH\n");
-  openfiletable_entry *file = (openfiletable_entry *)global.open_table[fd_type_SHARED_FILE].entries;
-  for (int i = 0; i < global.open_table[fd_type_SHARED_FILE].num_entries; i++)
+  opentable_entry *ot_entry = (opentable_entry *)global.open_table.entries;
+  for (int i = 0; i < global.open_table.num_entries; i++)
     {
-      if (array_entry_is_in_use(&file[i].table_base.array_base))
+      if (ot_entry->type == opentable_type_FILE && array_entry_is_in_use(&ot_entry[i].array_base))
 	{
-	  systemfiletable_entry *systemtable_entry = (systemfiletable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHARED_FILE], file->systemtable_idx);
-	  filelock_list *list = &file[i].locks;
+	  systemfiletable_entry *systemtable_entry = (systemfiletable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHARED_FILE], ot_entry->systemtable_idx);
+	  filelock_list *list = &ot_entry[i].file.locks;
 	  for (filelock *lock = filelocklist_get_first(list);
 	       lock;
 	       lock = filelocklist_get_next(list, lock))

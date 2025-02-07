@@ -12,6 +12,7 @@
 #include "fdop.h"
 #include "fdtable.h"
 #include "shmtable.h"
+#include "opentable.h"
 #include "swi.h"
 #include "types.h"
 
@@ -1001,7 +1002,7 @@ allocator_alloc (armeabi_allocator_t handle,
 			      required_page_count);
   if (err)
     return err;
-  
+
   if ((flags & ALLOCATOR_ALLOC_FLAGS_MASK) != ALLOCATOR_ALLOC_FLAG_MAP)
     return NULL;
 
@@ -1227,53 +1228,26 @@ allocator_munmap (armeabisupport_allocator_mmap *allocator,
         {
 	  if (page == current->start_page && page_count == current->end_page - current->start_page)
 	    {
-	      if (current->fd != -1)
+	      /* Freeing whole block. Is it a shared object?  */
+	      if (current->opentable_idx != ARRAY_INVALID_INDEX)
 	      {
-		LOG("%s: Found block with fd %d", __func__, current->fd);
+		LOG("%s: Found whole block with open table index %d", __func__, current->opentable_idx);
 #if ENABLE_LOGGING
-		fdtable_log(NULL);
-		openshmtable_log();
+		opentable_log();
 		systemshmtable_log();
 #endif
 
 		_kernel_oserror *err;
-		app_object *app;
-		if ((err = app_find(&app)) != NULL)
-		  return err;
-
-		fdtable_entry *fd;
-		if ((fd = get_fdtable_entry(app, current->fd)) == NULL
-		     || !array_entry_is_in_use(&fd->base))
+		opentable_entry *ot_entry;
+		if ((ot_entry = opentable_get_entry(current->opentable_idx)) == NULL
+		     || !array_entry_is_in_use(&ot_entry->array_base))
 		  return armeabisupport_EBADF;
 
-		/* Freeing whole block. Does it match a shared memory object? */
-		if (fd->type == fd_type_SHM)
-		  {
-#if ENABLE_LOGGING
-		    openshmtable_entry *openshm_entry =
-				(openshmtable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHM],
-									  fd->opentable_idx);
-		    systemshmtable_entry *systemshm_entry =
-				(systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
-									    openshm_entry->systemtable_idx);
-		    TRACE_SHM("allocator_munmap: shared memory object %p, \"%s\", fd=%d, addr=%p, len=%d, oref=%d, sref=%d",
-			      systemshm_entry,
-			      systemshm_entry->name,
-			      current->fd,
-			      page_to_addr(&systemshm_entry->allocator->base, systemshm_entry->block->start_page),
-			      pages_to_bytes(systemshm_entry->block->end_page - systemshm_entry->block->start_page),
-			      openshm_entry->table_base.ref_count,
-			      systemshm_entry->table_base.ref_count);
-#endif
-		    /* This will only call allocator_munmap_block() when the final reference is
-		     * released.  */
-		    openshmtable_deref_entry(fd->opentable_idx);
+		err = ot_entry->method->unmap(allocator, current);
+		if (err)
+		  return err;
 
-#if ENABLE_LOGGING
-		    fdtable_log(NULL);
-#endif
-		    return NULL;
-		  }
+		break;
 	      }
 
 	      /* The following is just an inline version of what allocator_munmap_block() does.  */
@@ -1308,6 +1282,7 @@ allocator_munmap (armeabisupport_allocator_mmap *allocator,
 	      new_block->start_page = page + page_count;
 	      new_block->end_page = current->end_page;
 	      new_block->fd = -1;
+	      new_block->opentable_idx = ARRAY_INVALID_INDEX;
 	      if (next)
 		linklist_add_before(&allocator->block_list, &next->link, &new_block->link);
 	      else
@@ -1344,14 +1319,14 @@ allocator_move_mmap_block(armeabisupport_allocator_mmap *allocator,
   armeabisupport_allocator_mmap *new_allocator;
   mmap_block *new_block;
 
-  err = armeabi_mmap(NULL,
-		     pages_to_bytes((block->end_page - block->start_page) + page_diff),
-		     block->prot,
-		     block->mmap_flags,
-		     block->fd,
-		     block->offset,
-		     &new_allocator,	/* May be same as the old one.  */
-		     &new_block);
+  err = armeabi_mmap_internal(NULL,
+			      pages_to_bytes((block->end_page - block->start_page) + page_diff),
+			      block->prot,
+			      block->mmap_flags,
+			      block->fd,
+			      block->offset,
+			      &new_allocator,	/* May be same as the old one.  */
+			      &new_block);
   if (err)
     {
       *allocator_ret = NULL;
@@ -1390,7 +1365,7 @@ allocator_mremap(armeabisupport_allocator_mmap *allocator,
 {
   if (page_diff < 0)
     {
-      TRACE("allocator_mremap: Reduce mapping by 0x%X pages", -page_diff);
+      LOG("allocator_mremap: Reduce mapping by 0x%X pages", -page_diff);
 
       /* Request to shrink the block. Unmap the pages we no longer need.  */
       block->end_page += page_diff;		/* Note -ve page_diff.  */
@@ -1409,7 +1384,7 @@ allocator_mremap(armeabisupport_allocator_mmap *allocator,
       mmap_block *next = linklist_next_mmap_block(block);
       if (next->start_page - block->end_page > page_diff)
         {
-	  TRACE("allocator_mremap: Extend block into gap before next block");
+	  LOG("allocator_mremap: Extend block into gap before next block");
 
 	  /* Expand into gap. Claim and Map in the new pages.  */
 	  if ((err = allocator_claim_pages(&allocator->base,
@@ -1433,7 +1408,7 @@ allocator_mremap(armeabisupport_allocator_mmap *allocator,
 	}
       else
 	{
-	  TRACE("allocator_mremap: Gap before next block not big enough, move to new block");
+	  LOG("allocator_mremap: Gap before next block not big enough, move to new block");
 
 	  if ((flags & MREMAP_MAYMOVE) == 0)
 	    {
@@ -1455,7 +1430,7 @@ allocator_mremap(armeabisupport_allocator_mmap *allocator,
        * to expand into.  */
       if (block->end_page + page_diff > allocator->base.da.max_size)
 	{
-	  TRACE("allocator_mremap: End of DA, but not enough space, move to new block");
+	  LOG("allocator_mremap: End of DA, but not enough space, move to new block");
 
 	  if ((flags & MREMAP_MAYMOVE) == 0)
 	    {
@@ -1473,7 +1448,7 @@ allocator_mremap(armeabisupport_allocator_mmap *allocator,
 	}
       else
         {
-	  TRACE("allocator_mremap: End of DA, extend into unused space");
+	  LOG("allocator_mremap: End of DA, extend into unused space");
 
 	  /* We can extend into the end of the DA. Claim and Map in the new pages.  */
 	  if ((err = allocator_claim_pages(&allocator->base,
@@ -1526,7 +1501,7 @@ allocator_mmap_cleanup_app(armeabisupport_allocator_mmap *allocator,
 
       if (block->owner == app)
 	{
-	  TRACE("allocator_mmap_cleanup_app:   removed");
+	  LOG("allocator_mmap_cleanup_app:   removed");
 	  unmap_release_pages(&allocator->base,
 			      block->start_page,
 			      block->end_page - block->start_page);
@@ -1534,7 +1509,7 @@ allocator_mmap_cleanup_app(armeabisupport_allocator_mmap *allocator,
 	  rma_free(block);
 	}
       else
-	TRACE("allocator_mmap_cleanup_app:   ignored");
+	LOG("allocator_mmap_cleanup_app:   ignored");
       block = next;
     }
 }
@@ -1637,24 +1612,24 @@ static void dump_memblock_list(armeabisupport_allocator *handle)
   }
 }
 
-static void dump_mmap_list(armeabisupport_allocator *handle)
+void dump_mmap_list(armeabisupport_allocator *handle)
 {
   armeabisupport_allocator_mmap *allocator = (armeabisupport_allocator_mmap *)handle;
   mmap_block *current = linklist_first_mmap_block (&allocator->block_list);
 
-  printf("  MMap allocator: %s / %p -> %p\n",
+  reporter_printf("  MMap allocator: %s / %p -> %p\n",
 	 allocator->base.name,
 	 allocator->base.da.base,
 	 page_to_addr(handle, allocator->base.da.size));
   if (!current)
   {
-    printf("    Empty list\n");
+    reporter_printf("    Empty list\n");
     return;
   }
 
   while (current)
     {
-      printf("    owner=0x%X; %.8X -> %.8X / %p -> %p / %d pages\n",
+      reporter_printf("    owner=0x%X; %.8X -> %.8X / %p -> %p / %d pages\n",
 	     current->owner->ID,
 	     current->start_page,
 	     current->end_page,

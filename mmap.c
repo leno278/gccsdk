@@ -11,6 +11,7 @@
 #include "shm.h"
 #include "fdtable.h"
 #include "shmtable.h"
+#include "opentable.h"
 #include "main.h"
 #include "swi.h"
 #include "debug.h"
@@ -35,13 +36,8 @@
 #define MMAPOP_GET_INFO	4
 #define MMAPOP_REMAP	5
 #define MMAPOP_GET_PROT	6
+#define MMAPOP_MSYNC	7
 #define MMAPOP_DUMP	16
-
-#if TRACE_SWIS
-#define TRACE_SWI(format,...) reporter_printf(format, ##__VA_ARGS__)
-#else
-#define TRACE_SWI(format,...)
-#endif
 
 static _kernel_oserror *
 armeabi_munmap(eabi_PTR addr,
@@ -73,6 +69,10 @@ armeabi_mremap (eabi_PTR addr,
 static _kernel_oserror *
 armeabi_get_page_protection (eabi_PTR addr,
 			     int *prot_ret);
+static _kernel_oserror *
+armeabi_msync (eabi_PTR addr,
+	       size_t len,
+	       unsigned flags);
 
 /*  r0 = reason code
 *	0 - Map
@@ -129,6 +129,13 @@ armeabi_get_page_protection (eabi_PTR addr,
 *	    r1 = address within page to get protection flags of
 *	  Exit:
 *	    r0 = mmap protection flags for page containing address given
+*	7 - msync
+*	  Entry:
+*	    r1 = address
+*	    r2 = number of bytes
+*	    r3 = flags
+*	  Exit:
+*	    r0 = 0 if successful (V flag clear) or error pointer (V flag set)
 */
 
 _kernel_oserror *
@@ -226,6 +233,13 @@ mmap_op(_kernel_swi_regs *r)
 	r->r[0] = prot;
       break;
     }
+    case MMAPOP_MSYNC:
+      TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_MSYNC, addr=0x%X, len=0x%X, flags=0x%X",
+		r->r[1], r->r[2], r->r[3]);
+      err = armeabi_msync((eabi_PTR)r->r[1],
+			  (size_t)r->r[2],
+			  (unsigned)r->r[3]);
+      break;
     case MMAPOP_DUMP:
       mmap_dump();
       break;
@@ -349,46 +363,53 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
   if (flags & MAP_FIXED)
     return armeabisupport_EINVAL;
 
+  return armeabi_mmap_internal(addr, size, prot, flags, fd, offset, allocator_ret, block_ret);
+}
+
+_kernel_oserror *
+armeabi_mmap_internal(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t offset,
+		      armeabisupport_allocator_mmap **allocator_ret, mmap_block **block_ret)
+{
   _kernel_oserror *err;
   app_object *app;
   if ((err = app_find(&app)) != NULL)
     return err;
 
-  fdtable_entry *fd_entry = NULL;
+  int opentable_idx = ARRAY_INVALID_INDEX;
   if (fd != -1)
     {
-      fd_entry = get_fdtable_entry(app, fd);
+      fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
       if (!fd_entry
-	  || !array_entry_is_in_use(&fd_entry->base)
-	  || fd_entry->type == fd_type_INVALID)
+	  || !array_entry_is_in_use(&fd_entry->base))
 	{
 	  /* We were given a file descriptor, but it doesn't match any that we know of.  */
 	  LOG("armeabi_mmap: Invalid fd (%d)", fd);
 	  return armeabisupport_EBADF;
 	}
+
+	opentable_idx = fd_entry->opentable_idx;
     }
 
+  opentable_entry *ot_entry = opentable_get_entry(opentable_idx);
   systemshmtable_entry *systemshm_entry = NULL;
-  openshmtable_entry *openshm_entry = NULL;
-  if (fd_entry && fd_entry->type == fd_type_SHM)
+  if (ot_entry && ot_entry->type == opentable_type_SHM)
     {
-      TRACE("armeabi_mmap: shm detected, fd=%d", fd);
-      openshm_entry = (openshmtable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHM],
-								fd_entry->opentable_idx);
+      LOG("armeabi_mmap: shm detected, open table index %d", opentable_idx);
       systemshm_entry = (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
-								    openshm_entry->systemtable_idx);
+								    ot_entry->systemtable_idx);
 
       if (systemshm_entry->block != NULL)
 	{
 	  /* We've already got a memory allocation for this shared memory object.  */
 	  *allocator_ret = systemshm_entry->allocator;
 	  *block_ret = systemshm_entry->block;
-	  openshm_entry->table_base.ref_count++;
-	  TRACE("armeabi_mmap: shm 0x%X already connected to mmap, name=\"%s\", new ref=%d, addr=0x%X",
-		systemshm_entry,
-		systemshm_entry->name,
-		openshm_entry->table_base.ref_count,
-		page_to_addr(&systemshm_entry->allocator->base, systemshm_entry->block->start_page));
+	  ot_entry->ref_count++;
+	  LOG("armeabi_mmap: shm 0x%X already connected to mmap open table index %d, name=\"%s\", new ref=%d, addr=0x%X (+++)",
+	      systemshm_entry,
+	      opentable_idx,
+	      systemshm_entry->name,
+	      ot_entry->ref_count,
+	      page_to_addr(&systemshm_entry->allocator->base, systemshm_entry->block->start_page));
 	  return NULL;
 	}
     }
@@ -418,7 +439,7 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
 	memset(buffer, 0, 16);
 	snprintf(buffer, 16, "mmap#%d", mmap_id++);
 
-	TRACE("armeabi_mmap: Creating new allocator %s", buffer);
+	LOG("armeabi_mmap: Creating new allocator %s", buffer);
 	/* End of allocator list or list is empty, either way, create a new allocator.  */
 	err = allocator_new_internal(buffer,
 				     MMAP_MAX_DA_SIZE,
@@ -442,7 +463,8 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
     if (!err && block != NULL)
       {
 	/* Record the owner of this block.  */
-	block->owner = app;
+	app_find(&block->owner);
+	block->opentable_idx = opentable_idx;
 	block->fd = fd;
 	block->mmap_flags = flags;
 	block->prot = prot;
@@ -451,20 +473,20 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
 	*allocator_ret = (armeabisupport_allocator_mmap *)allocator;
 	*block_ret = block;
 
-	if (openshm_entry && systemshm_entry)
+	if (ot_entry && systemshm_entry)
 	  {
 	    block->is_shm = true;
 	    systemshm_entry->allocator = (armeabisupport_allocator_mmap *)allocator;
 	    systemshm_entry->block = block;
-	    openshm_entry->table_base.ref_count++;
-	    TRACE("armeabi_mmap: shm 0x%X connecting to mmap, name=\"%s\", new ref=%d, addr=0x%X",
-		  systemshm_entry,
-		  systemshm_entry->name,
-		  openshm_entry->table_base.ref_count,
-		  page_to_addr(&systemshm_entry->allocator->base, systemshm_entry->block->start_page));
+	    ot_entry->ref_count++;
+	    LOG("armeabi_mmap: shm 0x%X connecting to mmap, name=\"%s\", new ref=%d, addr=0x%X (+++)",
+		systemshm_entry,
+		systemshm_entry->name,
+		ot_entry->ref_count,
+		page_to_addr(&systemshm_entry->allocator->base, systemshm_entry->block->start_page));
 	  }
-        TRACE("armeabi_mmap: Allocated %d pages @ 0x%X from allocator %s\n",
-	      num_pages, page_to_addr(allocator, block->start_page), allocator->name);
+        LOG("armeabi_mmap: Allocated %d pages @ 0x%X from allocator %s\n",
+	    num_pages, page_to_addr(allocator, block->start_page), allocator->name);
         return NULL;
       }
 
@@ -590,7 +612,7 @@ armeabi_get_info(eabi_PTR addr,
 		 size_t *size,
 		 int *prot,
 		 int *flags,
-		 int *handle,
+		 int *fd,
 		 size_t *offset)
 {
   if (!is_page_aligned(addr))
@@ -603,25 +625,26 @@ armeabi_get_info(eabi_PTR addr,
   if (!allocator)
     {
       LOG("armeabi_get_info: Failed to find address %p in allocator pool", addr);
-      return armeabisupport_EINVAL;
+      return armeabisupport_ENOMEM;
     }
 
   mmap_block *block = get_block(allocator, addr);
   if (!block)
     {
-      LOG("armeabi_get_info: Failed to find address %p in allocator pool", addr);
-      return armeabisupport_EINVAL;
+      LOG("armeabi_get_info: Failed to find block containing %p in allocator %s", addr, allocator->base.name);
+      dump_mmap_list(allocator);
+      return armeabisupport_ENOMEM;
     }
 
   *mmap_addr = page_to_addr(&allocator->base, block->start_page);
   *size = pages_to_bytes(block->end_page - block->start_page);
   *prot = block->prot;
   *flags = block->mmap_flags;
-  *handle = block->fd;
+  *fd = block->fd;
   *offset = block->offset;
 
-  TRACE("armeabi_get_info: addr=0x%X, mmap_addr=0x%X size=0x%X, prot=0x%X flags=0x%X, fd=%d, offset=%d",
-	addr, *mmap_addr, *size, *prot, *flags, *handle, *offset);
+  LOG("armeabi_get_info: addr=0x%X, mmap_addr=0x%X size=0x%X, prot=0x%X flags=0x%X, fd=%d, offset=%d",
+      addr, *mmap_addr, *size, *prot, *flags, *fd, *offset);
 
   return NULL;
 }
@@ -657,6 +680,14 @@ armeabi_mremap (eabi_PTR addr,
       LOG("armeabi_mremap: Failed to find block");
       err = armeabisupport_ENOMEM;
       goto error;
+    }
+
+  /* For simplicity don't allow remapping of mapped files.  */
+  if (block->opentable_idx != ARRAY_INVALID_INDEX)
+    {
+      LOG("armeabi_mremap: Attempt to remap file with open table index %d, addr:%p, old_len:%ld, new_len:%ld",
+	  block->opentable_idx, addr, old_len, new_len);
+      return armeabisupport_EOPSYS;
     }
 
   if (new_len == old_len)
@@ -723,4 +754,75 @@ armeabi_get_page_protection (eabi_PTR addr, int *prot_ret)
   *prot_ret = prot;
 
   return NULL;
+}
+
+_kernel_oserror *
+armeabi_msync (eabi_PTR addr,
+	       size_t len,
+	       unsigned flags)
+{
+  if ((unsigned)addr & PAGE_SIZE_MASK)
+    return armeabisupport_EINVAL;
+
+  armeabisupport_allocator_mmap *allocator = get_allocator(addr);
+  if (!allocator)
+    {
+      LOG("%s: Failed to find address (%p) in mmap allocator pool", __func__, addr);
+      return armeabisupport_ENOMEM;
+    }
+
+  mmap_block *block = get_block(allocator, addr);
+  if (!block)
+    {
+      LOG("%s: Failed to find block", __func__);
+      return armeabisupport_ENOMEM;
+    }
+
+  if (block->opentable_idx == ARRAY_INVALID_INDEX)
+    {
+      LOG("%s: Invalid open table index %d", __func__, block->opentable_idx);
+      return armeabisupport_ENOMEM;
+    }
+
+  /* Only valid if this is a file open for non-private writing.  */
+  if (!(block->prot & PROT_WRITE) || (block->mmap_flags & MAP_PRIVATE))
+    return armeabisupport_EINVAL;
+
+  opentable_entry *ot_entry = opentable_get_entry(block->opentable_idx);
+  if (!ot_entry ||
+      !array_entry_is_in_use(&ot_entry->array_base) ||
+      ot_entry->type != opentable_type_FILE)
+    return armeabisupport_EBADF;
+
+#if ENABLE_LOGGING
+  systemfiletable_entry *st_entry =
+		(systemfiletable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHARED_FILE],
+							     ot_entry->systemtable_idx);
+  LOG("%s: shared memory object %p, \"%s\", open table index %d, addr=%p, len=%d, oref=%d, sref=%d",
+       __func__,
+       st_entry,
+       st_entry->filename,
+       block->opentable_idx,
+       page_to_addr(&allocator->base, block->start_page),
+       pages_to_bytes(block->end_page - block->start_page),
+       ot_entry->ref_count,
+       st_entry->table_base.ref_count);
+#endif
+
+  off_t offset = block->offset;
+  int bytes_not_written;
+  _kernel_oserror *err;
+  err = systemfiletable_write_bytes(ot_entry->systemtable_idx,
+				    page_to_addr(&allocator->base, block->start_page),
+				    pages_to_bytes(block->end_page - block->start_page),
+				    &offset,
+				    &bytes_not_written);
+  if (err)
+    {
+      LOG("%s: OS Error: %s", __func__, err->errmess);
+    }
+  else if (bytes_not_written != 0)
+    err = armeabisupport_EIO;
+
+  return err;
 }

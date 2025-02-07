@@ -42,6 +42,8 @@ ARMEABISupport_SOURCES= \
 	ipcop.h \
 	ipctable.c \
 	ipctable.h \
+	opentable.c \
+	opentable.h \
 	armeabisupport.cmhg
 
 include_HEADERS=armeabi-support.h

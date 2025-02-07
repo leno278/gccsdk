@@ -15,8 +15,6 @@ typedef struct _fdtable_entry
 {
   array_entry_base base;
 
-  fd_type type;
-
   int opentable_idx;
 
   bool close_on_exec;
@@ -24,7 +22,6 @@ typedef struct _fdtable_entry
 } fdtable_entry;
 
 _kernel_oserror *fdtable_alloc_entry(app_object *app,
-				     fd_type type,
 				     int opentable_idx,
 				     bool close_on_exec,
 				     int *fd_ret);

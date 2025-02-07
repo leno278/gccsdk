@@ -9,6 +9,7 @@
 #include "filetable.h"
 #include "shmtable.h"
 #include "ipctable.h"
+#include "opentable.h"
 #include "memory.h"
 #include "types.h"
 #include "main.h"
@@ -30,28 +31,13 @@
 /* Return true if the FDs point to the same file/shm.  */
 static inline bool fdtable_entries_equal(fdtable_entry *fd1, fdtable_entry *fd2)
 {
-  if (fd1->type != fd2->type)
+  opentable_entry *ot_entry1 = opentable_get_entry(fd1->opentable_idx);
+  opentable_entry *ot_entry2 = opentable_get_entry(fd2->opentable_idx);
+
+  if (!ot_entry1 || !ot_entry2 || ot_entry1->type != ot_entry2->type)
     return false;
 
-  switch (fd1->type)
-  {
-    case fd_type_SHARED_FILE: {
-      openfiletable_entry *openfile_table = (openfiletable_entry *)&global.open_table[fd_type_SHARED_FILE];
-
-      return (openfile_table[fd1->opentable_idx].systemtable_idx ==
-	      openfile_table[fd2->opentable_idx].systemtable_idx);
-    }
-    case fd_type_SHM: {
-      openshmtable_entry *openshm_table = (openshmtable_entry *)&global.open_table[fd_type_SHM];
-
-      return (openshm_table[fd1->opentable_idx].systemtable_idx ==
-	      openshm_table[fd2->opentable_idx].systemtable_idx);
-    }
-    default:
-      break;
-  }
-
-  return false;
+  return (ot_entry1->systemtable_idx == ot_entry2->systemtable_idx);
 }
 
 fdtable_entry *get_fdtable_entry(app_object *app, int fd)
@@ -67,7 +53,6 @@ fdtable_entry *get_fdtable_entry(app_object *app, int fd)
 }
 
 _kernel_oserror *fdtable_alloc_entry(app_object *app,
-				     fd_type type,
 				     int opentable_idx,
 				     bool close_on_exec,
 				     int *fd_ret)
@@ -79,7 +64,6 @@ _kernel_oserror *fdtable_alloc_entry(app_object *app,
 
   fdtable_entry *entry = (fdtable_entry *)array_get_entry_ptr(&app->fd_table, *fd_ret);
 
-  entry->type = type;
   entry->opentable_idx = opentable_idx;
   entry->close_on_exec = close_on_exec;
 
@@ -150,19 +134,17 @@ _kernel_oserror *fdtable_open_file(const char *file, int flags, int mode, int *f
   if (err)
     goto error_return;
 
-  err = openfiletable_add_entry(sysfiletbl_idx, flags, mode, &openfiletbl_idx);
+  err = opentable_add_file(sysfiletbl_idx, flags, mode, &openfiletbl_idx);
   if (err)
     goto error_return;
 
 #if ENABLE_LOGGING
-  systemfiletable_log();
-  openfiletable_log();
+  opentable_log();
 #endif
 
-  LOG("%s:     opentable index=%d", __func__, openfiletbl_idx);
+  LOG("%s:     open table index %d", __func__, openfiletbl_idx);
 
   if ((err = fdtable_alloc_entry(app,
-				 fd_type_SHARED_FILE,
 				 openfiletbl_idx,
 				 /*close_on_exec=*/(flags & O_CLOEXEC) != 0,
 				 fd_ret)) == NULL)
@@ -184,7 +166,7 @@ error_return:
   if (sysfiletbl_idx != ARRAY_INVALID_INDEX)
     array_entry_mark_unused(array_get_entry_ptr(&global.system_table[fd_type_SHARED_FILE], sysfiletbl_idx));
   if (openfiletbl_idx != ARRAY_INVALID_INDEX)
-    array_entry_mark_unused(array_get_entry_ptr(&global.open_table[fd_type_SHARED_FILE], openfiletbl_idx));
+    array_entry_mark_unused(array_get_entry_ptr(&global.open_table, openfiletbl_idx));
 
   if (err)
     {
@@ -198,38 +180,23 @@ _kernel_oserror *fdtable_close(app_object *app, fdtable_entry *fd)
 {
   TRACE("%s: fd=%d", __func__, array_get_entry_idx(&app->fd_table, &fd->base) + FDTABLE_BASE_FD);
 
-  _kernel_oserror *err;
-
-  switch (fd->type)
-    {
-    case fd_type_SHARED_FILE:
-      /* IEEE Std 1003.1-1988 (“POSIX.1”) requires that all locks associated
-       * with a file for a given process are removed when any file descriptor for
-       * that file is closed by that process.
-       */
-      filelocklist_clear_locks(app, fd->opentable_idx);
-      err = openfiletable_deref_entry(fd->opentable_idx);
-      break;
-    case fd_type_SHM:
-      err = openshmtable_deref_entry(fd->opentable_idx);
-      break;
-    case fd_type_IPC:
-      err = openipctable_deref_entry(fd->opentable_idx);
-      break;
-    default:
-      err = armeabisupport_EBADF;
-      break;
-    }
-
-  fd->type = fd_type_INVALID;
-  fd->opentable_idx = ARRAY_INVALID_INDEX;
-  array_entry_mark_unused(&fd->base);
+  /* IEEE Std 1003.1-1988 (“POSIX.1”) requires that all locks associated
+   * with a file for a given process are removed when any file descriptor for
+   * that file is closed by that process.
+   */
+  filelocklist_clear_locks(app, fd->opentable_idx);
 
 #if ENABLE_LOGGING
   fdtable_log(NULL);
-  openshmtable_log();
-  systemshmtable_log();
+//  opentable_log();
 #endif
+
+  _kernel_oserror *err;
+
+  err = opentable_deref_entry(fd->opentable_idx);
+
+  fd->opentable_idx = ARRAY_INVALID_INDEX;
+  array_entry_mark_unused(&fd->base);
 
   return err;
 }
@@ -240,35 +207,34 @@ _kernel_oserror *fdtable_lseek(fdtable_entry *fd,
 			       off_t *offset_ret)
 {
   _kernel_oserror *err = NULL;
-
-  if (fd->type != fd_type_SHARED_FILE)
+  opentable_entry *entry = opentable_get_entry(fd->opentable_idx);
+  if (entry->type != opentable_type_FILE)
     return armeabisupport_EINVAL;
 
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
   off_t new_offset = (off_t)-1;
 
   switch (whence)
     {
     case SEEK_SET:
       new_offset = offset;
-      LOG("%s: SEEK_SET: new file offset = %ld", __func__, openfile_entry->file_offset);
+      LOG("%s: SEEK_SET: new file offset = %ld", __func__, entry->file.file_offset);
       break;
     case SEEK_CUR:
-      if ((LONG_MAX - openfile_entry->file_offset) < offset)
+      if ((LONG_MAX - entry->file.file_offset) < offset)
 	{
 	  err = armeabisupport_EOVERFLOW;
 	  LOG("%s: SEEK_CUR: EOVERFLOW: LONG_MAX=%ld, file_offset=%ld, (LONG_MAX - file_offset)=%ld",
-	      __func__, LONG_MAX, openfile_entry->file_offset, LONG_MAX - openfile_entry->file_offset);
+	      __func__, LONG_MAX, entry->file.file_offset, LONG_MAX - entry->file.file_offset);
 	}
       else
 	{
-	  new_offset = openfile_entry->file_offset + offset;
-	  LOG("%s: SEEK_CUR: new file offset = %ld", __func__, openfile_entry->file_offset);
+	  new_offset = entry->file.file_offset + offset;
+	  LOG("%s: SEEK_CUR: new file offset = %ld", __func__, entry->file.file_offset);
 	}
       break;
     case SEEK_END: {
       off_t file_length;
-      err = systemfiletable_get_file_length(openfile_entry->systemtable_idx, &file_length);
+      err = systemfiletable_get_file_length(entry->systemtable_idx, &file_length);
       if (!err)
 	{
 	  LOG("%s: file_length=%ld", __func__, file_length);
@@ -281,7 +247,7 @@ _kernel_oserror *fdtable_lseek(fdtable_entry *fd,
 	  else
 	    {
 	      new_offset = file_length + offset;
-	      LOG("%s: SEEK_END: new file offset = %ld", __func__, openfile_entry->file_offset);
+	      LOG("%s: SEEK_END: new file offset = %ld", __func__, entry->file.file_offset);
 	    }
 	}
       break;
@@ -300,7 +266,7 @@ _kernel_oserror *fdtable_lseek(fdtable_entry *fd,
       LOG("%s: Error: %s", __func__, err->errmess);
     }
   else
-    *offset_ret = openfile_entry->file_offset = new_offset;
+    *offset_ret = entry->file.file_offset = new_offset;
 
   return err;
 }
@@ -310,30 +276,30 @@ _kernel_oserror *fdtable_read(fdtable_entry *fd,
 			      size_t count,
 			      int *bytes_read)
 {
-  if (fd->type != fd_type_SHARED_FILE)
+  opentable_entry *entry = opentable_get_entry(fd->opentable_idx);
+
+  if (entry->type != opentable_type_FILE)
     return armeabisupport_EINVAL;
 
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
-
-  if ((openfile_entry->flags & O_ACCMODE) == O_WRONLY)
+  if ((entry->file.flags & O_ACCMODE) == O_WRONLY)
       return armeabisupport_EBADF;
 
   _kernel_oserror *err;
   off_t file_length;
-  if ((err = systemfiletable_get_file_length(openfile_entry->systemtable_idx, &file_length)) != NULL)
+  if ((err = systemfiletable_get_file_length(entry->systemtable_idx, &file_length)) != NULL)
     return armeabisupport_EINVAL;
 
-  if (count == 0 || openfile_entry->file_offset >= file_length)
+  if (count == 0 || entry->file.file_offset >= file_length)
     {
       *bytes_read = 0;
       return NULL;
     }
 
   int bytes_not_read;
-  err = systemfiletable_read_bytes(openfile_entry->systemtable_idx,
+  err = systemfiletable_read_bytes(entry->systemtable_idx,
 				   buf,
 				   count,
-				   &openfile_entry->file_offset,
+				   &entry->file.file_offset,
 				   &bytes_not_read);
   if (!err)
     *bytes_read = count - bytes_not_read;
@@ -348,12 +314,12 @@ _kernel_oserror *fdtable_write(fdtable_entry *fd,
 			       size_t count,
 			       int *bytes_written)
 {
-  if (fd->type != fd_type_SHARED_FILE)
+  opentable_entry *entry = opentable_get_entry(fd->opentable_idx);
+
+  if (entry->type != opentable_type_FILE)
     return armeabisupport_EINVAL;
 
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
-
-  if ((openfile_entry->flags & O_ACCMODE) == O_RDONLY)
+  if ((entry->file.flags & O_ACCMODE) == O_RDONLY)
     {
       LOG("%s: Error: read only", __func__);
       return armeabisupport_EBADF;
@@ -361,10 +327,10 @@ _kernel_oserror *fdtable_write(fdtable_entry *fd,
 
   _kernel_oserror *err;
   int bytes_not_written;
-  if (openfile_entry->flags & O_APPEND)
+  if (entry->file.flags & O_APPEND)
     {
-      err = systemfiletable_get_file_length(openfile_entry->systemtable_idx,
-					    &openfile_entry->file_offset);
+      err = systemfiletable_get_file_length(entry->systemtable_idx,
+					    &entry->file.file_offset);
       if (err)
 	{
 	  LOG("%s: Error=%s",__func__, err->errmess);
@@ -372,10 +338,10 @@ _kernel_oserror *fdtable_write(fdtable_entry *fd,
 	}
     }
 
-  err = systemfiletable_write_bytes(openfile_entry->systemtable_idx,
+  err = systemfiletable_write_bytes(entry->systemtable_idx,
 			      buf,
 			      count,
-			      &openfile_entry->file_offset,
+			      &entry->file.file_offset,
 			      &bytes_not_written);
   if (!err)
     *bytes_written = count - bytes_not_written;
@@ -394,14 +360,15 @@ fdtable_get_info(fdtable_entry *fd,
 		 off_t *length,
 		 unsigned *attributes)
 {
-  if (fd->type != fd_type_SHARED_FILE)
-    return armeabisupport_EINVAL;
-
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
-  if (!openfile_entry)
+  opentable_entry *entry = opentable_get_entry(fd->opentable_idx);
+  if (!entry)
     return armeabisupport_EBADF;
 
-  return systemfiletable_get_info(openfile_entry->systemtable_idx,
+  if (entry->type != opentable_type_FILE)
+    return armeabisupport_EINVAL;
+
+
+  return systemfiletable_get_info(entry->systemtable_idx,
 				  type,
 				  name,
 				  load,
@@ -412,7 +379,7 @@ fdtable_get_info(fdtable_entry *fd,
 
 /* If the returned end == NULL, then end should be interpreted as end of file.  */
 static _kernel_oserror *
-get_start_end_offsets(openfiletable_entry *openfile_entry,
+get_start_end_offsets(opentable_entry *entry,
 		      int whence,
 		      off_t offset,
 		      off_t len,
@@ -421,7 +388,7 @@ get_start_end_offsets(openfiletable_entry *openfile_entry,
 {
   _kernel_oserror *err;
   off_t file_length;
-  if ((err = systemfiletable_get_file_length(openfile_entry->systemtable_idx,
+  if ((err = systemfiletable_get_file_length(entry->systemtable_idx,
 					     &file_length)) == NULL)
     {
       switch (whence)
@@ -438,11 +405,11 @@ get_start_end_offsets(openfiletable_entry *openfile_entry,
 	case SEEK_CUR:
 	  if (len < 0)
 	    {
-	      *start = openfile_entry->file_offset + offset + len;
-	      *end = openfile_entry->file_offset + offset;
+	      *start = entry->file.file_offset + offset + len;
+	      *end = entry->file.file_offset + offset;
 	    }
 	  else
-	    *start = openfile_entry->file_offset + offset;
+	    *start = entry->file.file_offset + offset;
 	  break;
 	case SEEK_END:
 	  if (len < 0)
@@ -471,19 +438,19 @@ fdtable_get_lock(fdtable_entry *fd,
 		 off_t *offset,
 		 off_t *len)
 {
-  if (fd->type != fd_type_SHARED_FILE)
-    return armeabisupport_EINVAL;
-
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
-  if (!openfile_entry)
+  opentable_entry *entry = opentable_get_entry(fd->opentable_idx);
+  if (!entry)
     return armeabisupport_EBADF;
+
+  if (entry->type != opentable_type_FILE)
+    return armeabisupport_EINVAL;
 
   _kernel_oserror *err;
   off_t start, end;
-  if ((err = get_start_end_offsets(openfile_entry, *whence, *offset, *len, &start, &end)) != NULL)
+  if ((err = get_start_end_offsets(entry, *whence, *offset, *len, &start, &end)) != NULL)
     return err;
 
-  if (filelocklist_get_lock(&openfile_entry->locks,
+  if (filelocklist_get_lock(&entry->file.locks,
 			    fd->opentable_idx,
 			    &start,
 			    &end,
@@ -507,16 +474,16 @@ fdtable_set_lock(app_object *app,
 		 off_t *offset,
 		 off_t *len)
 {
-  if (fd->type != fd_type_SHARED_FILE)
-    return armeabisupport_EINVAL;
-
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
-  if (!openfile_entry)
+  opentable_entry *entry = opentable_get_entry(fd->opentable_idx);
+  if (!entry)
     return armeabisupport_EBADF;
+
+  if (entry->type != opentable_type_FILE)
+    return armeabisupport_EINVAL;
 
   _kernel_oserror *err;
   off_t start, end;
-  if ((err = get_start_end_offsets(openfile_entry, *whence, *offset, *len, &start, &end)) != NULL)
+  if ((err = get_start_end_offsets(entry, *whence, *offset, *len, &start, &end)) != NULL)
     return err;
 
   return *type == F_UNLCK
@@ -533,34 +500,34 @@ fdtable_set_lock(app_object *app,
 
 _kernel_oserror *fdtable_fsync(fdtable_entry *fd)
 {
-  if (fd->type != fd_type_SHARED_FILE)
-    return armeabisupport_EINVAL;
-
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
-  if (!openfile_entry)
+  opentable_entry *entry = opentable_get_entry(fd->opentable_idx);
+  if (!entry)
     return armeabisupport_EBADF;
 
-  return systemfiletable_fsync(openfile_entry->systemtable_idx);
+  if (entry->type != opentable_type_FILE)
+    return armeabisupport_EINVAL;
+
+  return systemfiletable_fsync(entry->systemtable_idx);
 }
 
 _kernel_oserror *fdtable_ftruncate(fdtable_entry *fd, off_t new_extent)
 {
   _kernel_oserror *err;
-  switch (fd->type)
+  opentable_entry *entry = opentable_get_entry(fd->opentable_idx);
+  switch (entry->type)
   {
-    case fd_type_SHARED_FILE: {
-      openfiletable_entry *openfile_entry = openfiletable_get_entry(fd->opentable_idx);
+    case opentable_type_FILE: {
       TRACE("%s: fd=%d, new_extent=%ld, path=%s",
 	    __func__,
 	    fd,
 	    new_extent,
-	    systemfiletable_get_filename(openfile_entry->systemtable_idx));
-      err = openfile_entry
-	    ? systemfiletable_ftruncate(openfile_entry->systemtable_idx, new_extent)
+	    systemfiletable_get_filename(entry->systemtable_idx));
+      err = entry
+	    ? systemfiletable_ftruncate(entry->systemtable_idx, new_extent)
 	    : armeabisupport_EBADF;
       break;
     }
-    case fd_type_SHM:
+    case opentable_type_SHM:
       /* This is a shared memory object which is currently a no-op for ftruncate.  */
       err = NULL;
       break;
@@ -604,29 +571,30 @@ _kernel_oserror *fdtable_open_ipc(size_t size, int fd_ret[2])
   LOG("%s:  fd1=%d, fd2=%d, write_buffer=%X, read_buffer=%X",
       __func__, fd1 + FDTABLE_BASE_FD, fd2 + FDTABLE_BASE_FD, write_buffer, read_buffer);
 
-  if ((err = openipctable_add_entry(sysipctbl_idx,
-				    write_buffer,
-				    read_buffer,
-				    size,
-				    &openipctbl1_idx)) != NULL)
+  if ((err = opentable_add_ipc(sysipctbl_idx,
+			       write_buffer,
+			       read_buffer,
+			       size,
+			       &openipctbl1_idx)) != NULL)
     goto error_return;
-  if ((err = openipctable_add_entry(sysipctbl_idx,
-				    read_buffer,
-				    write_buffer,
-				    size,
-				    &openipctbl2_idx)) != NULL)
+  if ((err = opentable_add_ipc(sysipctbl_idx,
+			       read_buffer,
+			       write_buffer,
+			       size,
+			       &openipctbl2_idx)) != NULL)
     goto error_return;
 
-  openipctable_entry *openipc1 = (openipctable_entry *)array_get_entry_ptr(&global.open_table[fd_type_IPC],
-									   openipctbl1_idx);
-  openipctable_entry *openipc2 = (openipctable_entry *)array_get_entry_ptr(&global.open_table[fd_type_IPC],
-									   openipctbl2_idx);
-  openipc1->openipctable_oppend_idx = openipctbl2_idx;
-  openipc2->openipctable_oppend_idx = openipctbl1_idx;
+  sysipc_entry->table_base.ref_count = 2;
+
+  opentable_entry *openipc1 = (opentable_entry *)array_get_entry_ptr(&global.open_table,
+								     openipctbl1_idx);
+  opentable_entry *openipc2 = (opentable_entry *)array_get_entry_ptr(&global.open_table,
+								     openipctbl2_idx);
+  openipc1->ipc.opentable_oppend_idx = openipctbl2_idx;
+  openipc2->ipc.opentable_oppend_idx = openipctbl1_idx;
 
   fdtable_entry *entry = (fdtable_entry *)fd_table->entries;
 
-  entry[fd1].type = entry[fd2].type = fd_type_IPC;
   entry[fd1].close_on_exec = entry[fd2].close_on_exec = false;
   entry[fd1].opentable_idx = openipctbl1_idx;
   entry[fd2].opentable_idx = openipctbl2_idx;
@@ -646,9 +614,9 @@ error_return:
   if (fd2 != ARRAY_INVALID_INDEX)
     array_entry_mark_unused(array_get_entry_ptr(fd_table, fd2));
   if (openipctbl1_idx != ARRAY_INVALID_INDEX)
-    array_entry_mark_unused(array_get_entry_ptr(&global.open_table[fd_type_IPC], openipctbl1_idx));
+    array_entry_mark_unused(array_get_entry_ptr(&global.open_table, openipctbl1_idx));
   if (openipctbl2_idx != ARRAY_INVALID_INDEX)
-    array_entry_mark_unused(array_get_entry_ptr(&global.open_table[fd_type_IPC], openipctbl2_idx));
+    array_entry_mark_unused(array_get_entry_ptr(&global.open_table, openipctbl2_idx));
   if (sysipctbl_idx != ARRAY_INVALID_INDEX)
     array_entry_mark_unused(array_get_entry_ptr(&global.system_table[fd_type_IPC], sysipctbl_idx));
 
@@ -676,27 +644,11 @@ _kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd
   if ((err = app_find(&app)) != NULL)
     return err;
 
-  bool exists = systemshmtable_shm_exists(name) == ARRAY_INVALID_INDEX;
-
-  /* Fail if O_CREAT is not set and the named shared memory object does not exist.  */
-  if (!exists && !(oflag & O_CREAT))
-    {
-      LOG("shm_open: \"%s\" does not exist and O_CREATE not set", name);
-      return armeabisupport_ENOENT;
-    }
-
-  /* Fail if O_CREAT and O_EXCL are set and the named shared memory object already exists.  */
-  if (exists && ((oflag & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)))
-    {
-      LOG("shm_open: \"%s\" already exists, but O_CREAT and O_EXCL are set", name);
-      return armeabisupport_EEXIST;
-    }
-
   err = systemshmtable_open_shm(name, oflag, mode, &sysshmtbl_idx);
   if (err)
     return err;
 
-  err = openshmtable_add_entry(sysshmtbl_idx, oflag, mode, &openshmtbl_idx);
+  err = opentable_add_shm(sysshmtbl_idx, oflag, mode, &openshmtbl_idx);
   if (err)
     {
       array_entry_mark_unused(array_get_entry_ptr(&global.system_table[fd_type_SHM], sysshmtbl_idx));
@@ -711,7 +663,6 @@ _kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd
 #endif
 
   if ((err = fdtable_alloc_entry(app,
-				 fd_type_SHM,
 				 openshmtbl_idx,
 				 /*close_on_exec=*/false,
 				 fd_ret)) == NULL)
@@ -731,7 +682,7 @@ _kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd
   if (sysshmtbl_idx != ARRAY_INVALID_INDEX)
     array_entry_mark_unused(array_get_entry_ptr(&global.system_table[fd_type_SHM], sysshmtbl_idx));
   if (openshmtbl_idx != ARRAY_INVALID_INDEX)
-    array_entry_mark_unused(array_get_entry_ptr(&global.open_table[fd_type_SHM], openshmtbl_idx));
+    array_entry_mark_unused(array_get_entry_ptr(&global.open_table, openshmtbl_idx));
 
   if (err)
     {
@@ -752,32 +703,32 @@ _kernel_oserror *fdtable_dup(fdtable_entry *fd, int *new_fd_ret)
 	__func__,
 	array_get_entry_idx(&app->fd_table, &fd->base) + FDTABLE_BASE_FD);
 
-  if (fd->type <= fd_type_INVALID || fd->type >= fd_type_MAX)
+  opentable_entry *entry = opentable_get_entry(fd->opentable_idx);
+  if (!entry)
+    return armeabisupport_EINVAL;
+
+  if (entry->type <= opentable_type_INVALID || entry->type >= opentable_type_MAX)
     {
-      LOG("%s: Out of range fd type %d", __func__, fd->type);
+      LOG("%s: FD type %d not known", __func__, entry->type);
       return armeabisupport_EBADF;
     }
 
   /* dup() is the only time that the opentable ref is ever incremented, open() creates
    * a new entry rather than increasing the ref.  */
-  table_entry_base *open_table;
-  open_table = (table_entry_base *)array_get_entry_ptr(&global.open_table[fd->type],
-						       fd->opentable_idx);
-  open_table->ref_count++;
+  entry->ref_count++;
 
   if ((err = fdtable_alloc_entry(app,
-				 fd->type,
 				 fd->opentable_idx,
 				 /*close_on_exec=*/false,
 				 new_fd_ret)) != NULL)
     return err;
 
-  LOG("%s: fd %d duplicated as fd %d, open table index %d ref count now %d",
+  LOG("%s: fd %d duplicated as fd %d, open table index %d ref count now %d (+++)",
       __func__,
       array_get_entry_idx(&app->fd_table, &fd->base) + FDTABLE_BASE_FD,
       *new_fd_ret,
       fd->opentable_idx,
-      open_table->ref_count);
+      entry->ref_count);
 
 #if ENABLE_LOGGING
   fdtable_log(NULL);
@@ -823,7 +774,6 @@ _kernel_oserror *fdtable_dup2(fdtable_entry *old_fd, int fd)
     }
 
   array_entry_mark_used(&new_fd->base);
-  new_fd->type = old_fd->type;
   new_fd->opentable_idx = old_fd->opentable_idx;
   new_fd->close_on_exec = false;
 
@@ -835,19 +785,7 @@ void fdtable_destroy(array_t *table)
   fdtable_entry *fd_entry = (fdtable_entry *)table->entries;
   for (int i = 0; i < table->num_entries; i++)
     if (array_entry_is_in_use(&fd_entry[i].base))
-      {
-	switch (fd_entry[i].type)
-	{
-	  case fd_type_SHARED_FILE:
-	    openfiletable_deref_entry(fd_entry[i].opentable_idx);
-	    break;
-	  case fd_type_SHM:
-	    openshmtable_deref_entry(fd_entry[i].opentable_idx);
-	    break;
-	  default:
-	    break;
-	}
-      }
+      opentable_deref_entry(fd_entry[i].opentable_idx);
 }
 
 void fdtable_print(app_object *app)
@@ -859,12 +797,10 @@ void fdtable_print(app_object *app)
   for (int i = 0; i < table->num_entries; i++)
     if (array_entry_is_in_use(&fd[i].base))
       {
-	switch (fd[i].type)
+	opentable_entry *open_entry = opentable_get_entry(fd[i].opentable_idx);
+	switch (open_entry->type)
 	{
-	  case fd_type_SHARED_FILE: {
-	    openfiletable_entry *open_entry =
-			(openfiletable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHARED_FILE],
-								   fd[i].opentable_idx);
+	  case opentable_type_FILE: {
 	    systemfiletable_entry *system_entry =
 			(systemfiletable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHARED_FILE],
 								   open_entry->systemtable_idx);
@@ -872,17 +808,14 @@ void fdtable_print(app_object *app)
 		   i + FDTABLE_BASE_FD,
 		   "FILE",
 		   fd[i].opentable_idx,
-		   open_entry->table_base.ref_count);
+		   open_entry->ref_count);
 	    printf("                     SYSTEM IDX:%-3d REF:%-3d PATH:%s\n",
 		   open_entry->systemtable_idx,
 		   system_entry->table_base.ref_count,
 		   system_entry->filename);
 	    break;
 	  }
-	  case fd_type_SHM: {
-	    openshmtable_entry *open_entry =
-			(openshmtable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHM],
-								  fd[i].opentable_idx);
+	  case opentable_type_SHM: {
 	    systemshmtable_entry *system_entry =
 			(systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
 								   open_entry->systemtable_idx);
@@ -890,36 +823,33 @@ void fdtable_print(app_object *app)
 		   i + FDTABLE_BASE_FD,
 		   "SHM",
 		   fd[i].opentable_idx,
-		   open_entry->table_base.ref_count);
+		   open_entry->ref_count);
 	    printf("                     SYSTEM IDX:%-3d REF:%-3d NAME:%s\n",
 		   open_entry->systemtable_idx,
 		   system_entry->table_base.ref_count,
 		   system_entry->name);
 	    break;
 	  }
-	  case fd_type_IPC: {
-	    openipctable_entry *open_entry =
-			(openipctable_entry *)array_get_entry_ptr(&global.open_table[fd_type_IPC],
-								  fd[i].opentable_idx);
+	  case opentable_type_IPC: {
 	    systemipctable_entry *system_entry =
 			(systemipctable_entry *)array_get_entry_ptr(&global.system_table[fd_type_IPC],
 								   open_entry->systemtable_idx);
 	    printf("%-8d %-10s WB:%10X RB:%10X WP:%10d RP:%10d\n",
 		   i + FDTABLE_BASE_FD,
 		   "IPC",
-		   (unsigned)open_entry->write_buffer,
-		   (unsigned)open_entry->read_buffer,
-		   open_entry->write_pos,
-		   open_entry->read_pos);
+		   (unsigned)open_entry->ipc.write_buffer,
+		   (unsigned)open_entry->ipc.read_buffer,
+		   open_entry->ipc.write_pos,
+		   open_entry->ipc.read_pos);
 	    printf("                  OPEN IDX:%-3d REF:%d\n",
 		   fd[i].opentable_idx,
-		   open_entry->table_base.ref_count);
+		   open_entry->ref_count);
 	    printf("                        SYSTEM IDX:%-3d REF:%d\n",
 		   open_entry->systemtable_idx,
 		   system_entry->table_base.ref_count);
 	    break;
 	  }
-	  case fd_type_INVALID:
+	  case opentable_type_INVALID:
 	  default:
 	    printf("%-8d %s\n",
 		   i + FDTABLE_BASE_FD,
@@ -939,9 +869,7 @@ void fdtable_copy(app_object *dst_app, app_object *src_app)
   for (int i = 0; i < array->num_entries; i++)
     if (array_entry_is_in_use(&fd[i].base))
       {
-	table_entry_base *open_table;
-	open_table = (table_entry_base *)array_get_entry_ptr(&global.open_table[fd[i].type],
-							     fd[i].opentable_idx);
+	opentable_entry *open_table = opentable_get_entry(fd[i].opentable_idx);
 	open_table->ref_count++;
       }
 }
@@ -980,12 +908,10 @@ void fdtable_log(app_object *app)
   for (int i = 0; i < table->num_entries; i++)
     if (array_entry_is_in_use(&fd[i].base))
       {
-	switch (fd[i].type)
+	opentable_entry *open_entry = opentable_get_entry(fd[i].opentable_idx);
+	switch (open_entry->type)
 	{
-	  case fd_type_SHARED_FILE: {
-	    openfiletable_entry *open_entry =
-			(openfiletable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHARED_FILE],
-								   fd[i].opentable_idx);
+	  case opentable_type_FILE: {
 	    systemfiletable_entry *system_entry =
 			(systemfiletable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHARED_FILE],
 								   open_entry->systemtable_idx);
@@ -993,7 +919,7 @@ void fdtable_log(app_object *app)
 			    i + FDTABLE_BASE_FD,
 			    "FILE",
 			    fd[i].opentable_idx,
-			    open_entry->table_base.ref_count);
+			    open_entry->ref_count);
 	    reporter_printf("                   SYSTEM IDX:%-3d REF:%-3d HANDLE:%d PATH:%s",
 			    open_entry->systemtable_idx,
 			    system_entry->table_base.ref_count,
@@ -1001,10 +927,7 @@ void fdtable_log(app_object *app)
 			    system_entry->filename);
 	    break;
 	  }
-	  case fd_type_SHM: {
-	    openshmtable_entry *open_entry =
-			(openshmtable_entry *)array_get_entry_ptr(&global.open_table[fd_type_SHM],
-								  fd[i].opentable_idx);
+	  case opentable_type_SHM: {
 	    systemshmtable_entry *system_entry =
 			(systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
 								   open_entry->systemtable_idx);
@@ -1012,17 +935,15 @@ void fdtable_log(app_object *app)
 			    i + FDTABLE_BASE_FD,
 			    "SHM",
 			    fd[i].opentable_idx,
-			    open_entry->table_base.ref_count);
-	    reporter_printf("                   SYSTEM IDX:%-3d REF:%-3d NAME:%s",
+			    open_entry->ref_count);
+	    reporter_printf("                   SYSTEM IDX:%-3d REF:%-3d ADDR:%10X NAME:%s",
 			    open_entry->systemtable_idx,
 			    system_entry->table_base.ref_count,
+			    page_to_addr(&system_entry->allocator->base, system_entry->block->start_page),
 			    system_entry->name);
 	    break;
 	  }
-	  case fd_type_IPC: {
-	    openipctable_entry *open_entry =
-			(openipctable_entry *)array_get_entry_ptr(&global.open_table[fd_type_IPC],
-								  fd[i].opentable_idx);
+	  case opentable_type_IPC: {
 	    systemipctable_entry *system_entry =
 			(systemipctable_entry *)array_get_entry_ptr(&global.system_table[fd_type_IPC],
 								   open_entry->systemtable_idx);
@@ -1030,18 +951,18 @@ void fdtable_log(app_object *app)
 			    i + FDTABLE_BASE_FD,
 			    "IPC",
 			    fd[i].opentable_idx,
-			    open_entry->table_base.ref_count);
+			    open_entry->ref_count);
 	    reporter_printf("                   SYSTEM IDX:%-3d REF:%d",
 			    open_entry->systemtable_idx,
 			    system_entry->table_base.ref_count);
 	    reporter_printf("                           WB:%10X RB:%10X WP:%10d RP:%10d",
-			    (unsigned)open_entry->write_buffer,
-			    (unsigned)open_entry->read_buffer,
-			    open_entry->write_pos,
-			    open_entry->read_pos);
+			    (unsigned)open_entry->ipc.write_buffer,
+			    (unsigned)open_entry->ipc.read_buffer,
+			    open_entry->ipc.write_pos,
+			    open_entry->ipc.read_pos);
 	    break;
 	  }
-	  case fd_type_INVALID:
+	  case opentable_type_INVALID:
 	  default:
 	    reporter_printf("%-8d %s",
 			    i + FDTABLE_BASE_FD,

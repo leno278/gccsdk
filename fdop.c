@@ -7,6 +7,7 @@
 #include "armeabisupport.h"
 #include "fdop.h"
 #include "fdtable.h"
+#include "opentable.h"
 #include "array.h"
 #include "shm.h"
 #include "memory.h"
@@ -149,8 +150,9 @@ fd_op(_kernel_swi_regs *r)
   switch (reason)
   {
   case FDOP_VALIDATE: {
-    r->r[1] = fd->type;
-    if (fd->type == fd_type_INVALID)
+    opentable_entry *ot_entry = opentable_get_entry(fd->opentable_idx);
+    r->r[1] = ot_entry->type;
+    if (ot_entry->type == opentable_type_INVALID)
       err = armeabisupport_EBADF;
     break;
   }

@@ -6,7 +6,9 @@
 
 #include "armeabisupport.h"
 #include "filetable.h"
+#include "opentable.h"
 #include "fdtable.h"
+#include "memory.h"
 #include "types.h"
 #include <string.h>
 #include <stdlib.h>
@@ -24,6 +26,15 @@
 #define OBJECT_TYPE_FILE 1
 #define OBJECT_TYPE_DIR 2
 #define OBJECT_TYPE_IMAGE 2
+
+static void opentable_log_file_entry(opentable_entry *ot_entry);
+
+static opentable_methods file_methods =
+{
+  systemfiletable_deref_entry,
+  opentable_unmap_file,
+  opentable_log_file_entry
+};
 
 /* Return object type -1=error, 0=not found, 1=file, 2=directory, 3=image.  */
 static int file_object_type(const char *canon_filename)
@@ -375,26 +386,24 @@ systemfiletable_get_info(int filetable_idx,
   return osfile_read_file_info(entry[filetable_idx].filename, type, load, exec, length, attributes);
 }
 
-_kernel_oserror *openfiletable_add_entry(int systemtable_idx, int flags, int mode, int *idx_ret)
+_kernel_oserror *opentable_add_file(int systemtable_idx, int flags, int mode, int *idx_ret)
 {
   TRACE("%s: systemtable_idx=%d", __func__, systemtable_idx);
 
-  array_t *filetable = &global.open_table[fd_type_SHARED_FILE];
-
-  LOG("%s:     systemtable index=%d", __func__, systemtable_idx);
-
   _kernel_oserror *err;
-  if ((err = array_alloc_entry(filetable, idx_ret)) == NULL)
+  if ((err = opentable_add_entry(opentable_type_FILE,
+				 systemtable_idx,
+				 &file_methods,
+				 idx_ret)) == NULL)
     {
-      openfiletable_entry *entry = (openfiletable_entry *)array_get_entry_ptr(filetable, *idx_ret);
+      opentable_entry *entry = opentable_get_entry(*idx_ret);
 
       entry->systemtable_idx = systemtable_idx;
-      entry->flags = flags;
-      entry->mode = mode;
-      entry->file_offset = 0;
-      entry->table_base.ref_count = 1;
+      entry->file.flags = flags;
+      entry->file.mode = mode;
+      entry->file.file_offset = 0;
 
-      err = filelocklist_ctor(&entry->locks);
+      err = filelocklist_ctor(&entry->file.locks);
     }
 
   if (err)
@@ -405,44 +414,73 @@ _kernel_oserror *openfiletable_add_entry(int systemtable_idx, int flags, int mod
   return err;
 }
 
-_kernel_oserror *openfiletable_deref_entry(int openfiletable_idx)
+_kernel_oserror *opentable_unmap_file(armeabisupport_allocator_mmap *allocator,
+				      mmap_block *block)
 {
-  TRACE("%s: openfiletable_idx=%d", __func__, openfiletable_idx);
-  _kernel_oserror *err = NULL;
+  TRACE("%s: opentable_idx=%d", __func__, block->opentable_idx);
 
-  openfiletable_entry *openfile_entry = openfiletable_get_entry(openfiletable_idx);
+  opentable_entry *ot_entry = opentable_get_entry(block->opentable_idx);
+  if (!ot_entry || !array_entry_is_in_use(&ot_entry->array_base))
+    return armeabisupport_EBADF;
 
-  if (openfile_entry && array_entry_is_in_use(&openfile_entry->table_base.array_base))
+#if ENABLE_LOGGING
+  systemfiletable_entry *st_entry =
+		(systemfiletable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHARED_FILE],
+							     ot_entry->systemtable_idx);
+  LOG("%s: shared memory object %p, \"%s\", open table index %d, addr=%p, len=%d, oref=%d, sref=%d",
+       __func__,
+       st_entry,
+       st_entry->filename,
+       block->opentable_idx,
+       page_to_addr(&allocator->base, block->start_page),
+       pages_to_bytes(block->end_page - block->start_page),
+       ot_entry->ref_count,
+       st_entry->table_base.ref_count);
+#endif
+
+  off_t offset = block->offset;
+  int bytes_not_written;
+  _kernel_oserror *err;
+  err = systemfiletable_write_bytes(ot_entry->systemtable_idx,
+				    page_to_addr(&allocator->base, block->start_page),
+				    pages_to_bytes(block->end_page - block->start_page),
+				    &offset,
+				    &bytes_not_written);
+  if (err)
     {
-      openfile_entry->table_base.ref_count--;
-      LOG("%s:   Open table ref count now %d", __func__, openfile_entry->table_base.ref_count);
-      if (openfile_entry->table_base.ref_count == 0)
-	{
-	  err = systemfiletable_deref_entry(openfile_entry->systemtable_idx);
-	  openfile_entry->systemtable_idx = ARRAY_INVALID_INDEX;
-	  array_entry_mark_unused(&openfile_entry->table_base.array_base);
-	}
+      LOG("%s: OS Error: %s", __func__, err->errmess);
     }
 
-  return err;
+  /* This will only call allocator_munmap_block() when the final reference is released.  */
+  opentable_deref_entry(block->opentable_idx);
+
+  /* Don't return the error, a file error shouldn't halt the process of unmapping
+   * the memory.  */
+  return NULL;
+}
+
+const char *openfiletable_get_filename(int opentable_idx)
+{
+  opentable_entry *entry = opentable_get_entry(opentable_idx);
+  return systemfiletable_get_filename(entry->systemtable_idx);
 }
 
 void openfiletable_print(void)
 {
-  array_t *filetable = &global.open_table[fd_type_SHARED_FILE];
-  openfiletable_entry *entry = (openfiletable_entry *)filetable->entries;
+  array_t *table = &global.open_table;
+  opentable_entry *ot_entry = (opentable_entry *)table->entries;
 
   printf("%-4s %-12s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF", "OFFSET");
-  for (int i = 0; i < filetable->num_entries; i++)
+  for (int i = 0; i < table->num_entries; i++)
     {
-      if (array_entry_is_in_use(&entry[i].table_base.array_base))
+      if (ot_entry[i].type == opentable_type_FILE && array_entry_is_in_use(&ot_entry[i].array_base))
 	{
 	  printf("%-4d %-12d %-12d %-12ld %s\n",
 		 i,
-		 entry[i].systemtable_idx,
-		 entry[i].table_base.ref_count,
-		 entry[i].file_offset,
-		 systemfiletable_get_filename(entry[i].systemtable_idx));
+		 ot_entry[i].systemtable_idx,
+		 ot_entry[i].ref_count,
+		 ot_entry[i].file.file_offset,
+		 systemfiletable_get_filename(ot_entry[i].systemtable_idx));
 	}
     }
 }
@@ -462,24 +500,41 @@ void systemfiletable_print(void)
     }
 }
 
+static void opentable_log_file_entry(opentable_entry *ot_entry)
+{
+  int index = opentable_get_index(ot_entry);
+  systemfiletable_entry *system_entry =
+	      (systemfiletable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHARED_FILE],
+							   ot_entry->systemtable_idx);
+  reporter_printf("%4d %4s %4d %6d",
+		  index,
+		  "FILE",
+		  ot_entry->ref_count,
+		  ot_entry->systemtable_idx);
+  reporter_printf("                   SYSTEM: REF:%3d HANDLE:%4d PATH:%s",
+		  system_entry->table_base.ref_count,
+		  system_entry->file_handle,
+		  system_entry->filename);
+}
+
 #if ENABLE_LOGGING
 
 void openfiletable_log(void)
 {
-  array_t *filetable = &global.open_table[fd_type_SHARED_FILE];
-  openfiletable_entry *entry = (openfiletable_entry *)filetable->entries;
+  array_t *table = &global.open_table;
+  opentable_entry *ot_entry = (opentable_entry *)table->entries;
 
   reporter_printf("%-4s %-12s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF", "OFFSET");
-  for (int i = 0; i < filetable->num_entries; i++)
+  for (int i = 0; i < table->num_entries; i++)
     {
-      if (array_entry_is_in_use(&entry[i].table_base.array_base))
+      if (ot_entry[i].type == opentable_type_FILE && array_entry_is_in_use(&ot_entry[i].array_base))
 	{
 	  reporter_printf("%-4d %-12d %-12d %-12ld %s\n",
 			  i,
-			  entry[i].systemtable_idx,
-			  entry[i].table_base.ref_count,
-			  entry[i].file_offset,
-			  systemfiletable_get_filename(entry[i].systemtable_idx));
+			  ot_entry[i].systemtable_idx,
+			  ot_entry[i].ref_count,
+			  ot_entry[i].file.file_offset,
+			  systemfiletable_get_filename(ot_entry[i].systemtable_idx));
 	}
     }
 }

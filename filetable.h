@@ -13,25 +13,15 @@
 #include <unistd.h>
 #include <swi.h>
 
-typedef struct _openfiletable_entry
+typedef struct _openfiletable
 {
-  table_entry_base table_base;
-
-  int systemtable_idx;
   int flags;
   int mode;
   off_t file_offset;
 
   filelock_list locks;
 
-} openfiletable_entry;
-
-static inline openfiletable_entry *openfiletable_get_entry(int idx)
-{
-  array_t *open_filetable = &global.open_table[fd_type_SHARED_FILE];
-  openfiletable_entry *openfile_entry = (openfiletable_entry *)open_filetable->entries;
-  return &openfile_entry[idx];
-}
+} openfiletable;
 
 static inline _kernel_oserror *osargs_flush_file(int file_handle)
 {
@@ -51,7 +41,6 @@ static inline _kernel_oserror *osargs_write_file_extent(int file_handle, off_t n
 }
 
 _kernel_oserror *openfiletable_add_entry(int systemtable_idx, int flags, int mode, int *idx_ret);
-_kernel_oserror *openfiletable_deref_entry(int openfiletable_idx);
 void openfiletable_print(void);
 
 typedef struct _systemfiletable_entry
@@ -77,8 +66,11 @@ systemfiletable_get_info(int filetable_idx,
 			 unsigned *attributes);
 
 _kernel_oserror *systemfiletable_get_file_length(int filetable_idx, off_t *length);
-_kernel_oserror *systemfiletable_read_bytes(int fd, void *buf, size_t count, off_t *, int *bytes_not_read);
-_kernel_oserror *systemfiletable_write_bytes(int fd, void *buf, size_t count, off_t *, int *bytes_not_written);
+_kernel_oserror *systemfiletable_read_bytes(int systemtable_idx, void *buf, size_t count, off_t *, int *bytes_not_read);
+_kernel_oserror *systemfiletable_write_bytes(int systemtable_idx, void *buf, size_t count, off_t *, int *bytes_not_written);
+_kernel_oserror *opentable_unmap_file(armeabisupport_allocator_mmap *allocator,
+				      mmap_block *block);
+const char *openfiletable_get_filename(int opentable_idx);
 
 static inline _kernel_oserror *systemfiletable_fsync(int systemtable_idx)
 {
@@ -108,13 +100,6 @@ systemfiletable_get_filename(int systemtable_idx)
   systemfiletable_entry *entry = (systemfiletable_entry *)array_get_entry_ptr(system_filetable,
 									      systemtable_idx);
   return entry->filename;
-}
-
-static inline const char *
-openfiletable_get_filename(int opentable_idx)
-{
-  openfiletable_entry *entry = openfiletable_get_entry(opentable_idx);
-  return systemfiletable_get_filename(entry->systemtable_idx);
 }
 
 void openfiletable_log(void);

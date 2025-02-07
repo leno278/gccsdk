@@ -1,6 +1,6 @@
 /* main.c
  *
- * Copyright 2019-2024 GCCSDK Developers
+ * Copyright 2019-2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -21,10 +21,10 @@
 #include "array.h"
 #include "debug.h"
 
-#define ENABLE_TRACING 1
+#define ENABLE_TRACING 0
 #include "trace.h"
 
-#define ENABLE_LOGGING 1
+#define ENABLE_LOGGING 0
 #include "log.h"
 
 armeabisupport_globals global;
@@ -113,20 +113,6 @@ app_find(app_object **app_ret)
   return NULL;
 }
 
-static void
-app_remove_by_handle(app_object *app)
-{
-  if (app)
-    {
-      abort_deregister(get_mmap_abort_handler(), (unsigned)&global.mmap_allocator_pool);
-      abort_deregister(get_stack_abort_handler(), (unsigned)&app->stack_abort_data);
-      fdtable_destroy(&app->fd_table);
-      array_dtor(&app->fd_table);
-      linklist_remove(&global.app_list, &app->link);
-      rma_free(app);
-    }
-}
-
 _kernel_oserror *
 armeabi_cleanup(void)
 {
@@ -146,12 +132,19 @@ armeabi_cleanup(void)
       stack = next;
     }
 
-  allocator_destroy_all(&app->allocator_list);
+  abort_deregister(get_mmap_abort_handler(), (unsigned)&global.mmap_allocator_pool);
+  abort_deregister(get_stack_abort_handler(), (unsigned)&app->stack_abort_data);
+
+  fdtable_destroy(&app->fd_table);
+  array_dtor(&app->fd_table);
+  linklist_remove(&global.app_list, &app->link);
 
   /* Remove all remaining mmap allocations for this app.  */
   mmap_cleanup_app(app);
 
-  app_remove_by_handle(app);
+  allocator_destroy_all(&app->allocator_list);
+
+  rma_free(app);
 
   return NULL;
 }

@@ -1,6 +1,6 @@
 /* mmap.h
  *
- * Copyright 2021 GCCSDK Developers
+ * Copyright 2021-2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -16,5 +16,8 @@ extern void mmap_cleanup_app(app_object *app);
 extern _kernel_oserror *
 armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t offset,
 	     armeabisupport_allocator_mmap **allocator_ret, mmap_block **block_ret);
+extern _kernel_oserror *
+armeabi_mmap_internal(eabi_PTR addr, size_t size, int prot, int flags, int opentable_idx, size_t offset,
+		      armeabisupport_allocator_mmap **allocator_ret, mmap_block **block_ret);
 
 #endif

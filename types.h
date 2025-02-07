@@ -1,6 +1,6 @@
 /* types.h
  *
- * Copyright 2019-2024 GCCSDK Developers
+ * Copyright 2019-2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -27,6 +27,8 @@
 typedef unsigned int stack_t;
 typedef unsigned char *eabi_PTR;
 typedef void *armeabi_allocator_t;
+
+struct _opentable_entry;
 
 typedef enum fd_type
 {
@@ -106,7 +108,7 @@ typedef struct armeabisupport_globals
   unsigned os_memory_prot_read_write;
   unsigned os_memory_prot_exec;
 
-  array_t open_table[fd_type_MAX];
+  array_t open_table;
   array_t system_table[fd_type_MAX];
 
   app_object *parent;
@@ -162,6 +164,7 @@ typedef struct mmap_block
 
   int prot;		/* Memory protection flags as used by mmap  */
   int mmap_flags;	/* Flags as used by mmap  */
+  int opentable_idx;
   int fd;
   uint32_t offset;
 

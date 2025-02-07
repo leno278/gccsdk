@@ -15,6 +15,7 @@
 #include "shmtable.h"
 #include "filetable.h"
 #include "ipctable.h"
+#include "opentable.h"
 #include "mmap.h"
 
 #define ENABLE_TRACING 0
@@ -90,11 +91,6 @@ _kernel_oserror *module_initialise (const char *tail, int podule_base, void *pw)
 
   memset (&global, 0, sizeof (armeabisupport_globals));
 
-  static const int opentable_entry_size[fd_type_MAX] = {
-    sizeof(openshmtable_entry),
-    sizeof(openfiletable_entry),
-    sizeof(openipctable_entry)
-  };
   static const int systemtable_entry_size[fd_type_MAX] = {
     sizeof(systemshmtable_entry),
     sizeof(systemfiletable_entry),
@@ -102,10 +98,9 @@ _kernel_oserror *module_initialise (const char *tail, int podule_base, void *pw)
   };
 
   for (int i = 0; i < fd_type_MAX; i++)
-    {
-      array_ctor(&global.system_table[i], systemtable_entry_size[i]);
-      array_ctor(&global.open_table[i], opentable_entry_size[i]);
-    }
+    array_ctor(&global.system_table[i], systemtable_entry_size[i]);
+
+  array_ctor(&global.open_table, sizeof(opentable_entry));
 
   // linklist_init_list (&global.app_list);
   // global.flags.no_client_check = false;
@@ -164,18 +159,18 @@ _kernel_oserror *module_finalisation (int fatal, int podule_base, void *pw)
   // Remove all mmap allocations and allocators.
   allocator_destroy_all(&global.mmap_allocator_pool);
 
-  for (int i = 0; i < global.open_table[fd_type_SHARED_FILE].num_entries; i++)
-    if (array_entry_is_in_use(&global.open_table[fd_type_SHARED_FILE].entries[i]))
+  for (int i = 0; i < global.open_table.num_entries; i++)
+    if (array_entry_is_in_use(&global.open_table.entries[i]))
       {
-	openfiletable_entry *entry = openfiletable_get_entry(i);
-	filelocklist_dtor(&entry->locks);
+	opentable_entry *ot_entry = opentable_get_entry(i);
+	if (ot_entry->type == opentable_type_FILE)
+	  filelocklist_dtor(&ot_entry->file.locks);
       }
 
   for (int i = 0; i < fd_type_MAX; i++)
-    {
-      array_dtor(&global.system_table[i]);
-      array_dtor(&global.open_table[i]);
-    }
+    array_dtor(&global.system_table[i]);
+
+  array_dtor(&global.open_table);
 
   remove_pre_filter();
   remove_post_filter();

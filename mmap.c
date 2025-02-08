@@ -24,7 +24,7 @@
 #define ENABLE_SWI_TRACING 0
 #include "trace.h"
 
-#define ENABLE_LOGGING 0
+#define ENABLE_LOGGING 1
 #include "log.h"
 
 #define MMAP_MAX_DA_SIZE (100 * 1024 * 1024)
@@ -64,7 +64,7 @@ armeabi_mremap (eabi_PTR addr,
 		size_t old_len,
 		size_t new_len,
 		int flags,
-		armeabisupport_allocator_mmap **allocator_ret,
+		armeabisupport_allocator **allocator_ret,
 		mmap_block **block_ret);
 static _kernel_oserror *
 armeabi_get_page_protection (eabi_PTR addr,
@@ -145,7 +145,7 @@ mmap_op(_kernel_swi_regs *r)
   switch (r->r[0])
   {
     case MMAPOP_MAP: {
-      armeabisupport_allocator_mmap *allocator;
+      armeabisupport_allocator *allocator;
       mmap_block *block;
       TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_MAP, addr=0x%X, size=0x%X, prot=0x%X, flags=0x%X, fd=%d, offset:%d",
 		r->r[1], r->r[2], r->r[3], r->r[4], r->r[5], r->r[6]);
@@ -159,7 +159,7 @@ mmap_op(_kernel_swi_regs *r)
 			 &block);
       if (!err)
 	{
-	  r->r[0] = (int)page_to_addr(&allocator->base, block->start_page);
+	  r->r[0] = (int)page_to_addr(allocator, block->start_page);
 	  TRACE_SWI("  Result = 0x%X", r->r[0]);
 	}
       break;
@@ -207,7 +207,7 @@ mmap_op(_kernel_swi_regs *r)
       break;
     }
     case MMAPOP_REMAP: {
-      armeabisupport_allocator_mmap *allocator;
+      armeabisupport_allocator *allocator;
       mmap_block *block;
 
       TRACE_SWI("SWI \"ARMEABISupport_MMapOp\", MMAPOP_REMAP, addr=0x%X, old_size=0x%X, new_size=0x%X, flags=0x%X",
@@ -220,7 +220,7 @@ mmap_op(_kernel_swi_regs *r)
 			   &block);
       if (!err)
 	{
-	  r->r[0] = (int)page_to_addr(&allocator->base, block->start_page);
+	  r->r[0] = (int)page_to_addr(allocator, block->start_page);
 	  TRACE_SWI("  Result = 0x%X", r->r[0]);
 	}
       break;
@@ -256,22 +256,22 @@ mmap_op(_kernel_swi_regs *r)
   return err;
 }
 
-static inline armeabisupport_allocator_mmap *
+static inline armeabisupport_allocator *
 get_allocator(const eabi_PTR addr)
 {
-  armeabisupport_allocator_mmap *allocator;
-  for (allocator = (armeabisupport_allocator_mmap *)linklist_first_armeabisupport_allocator(&global.mmap_allocator_pool);
-       allocator && (addr < allocator->base.da.base || addr >= (allocator->base.da.base + pages_to_bytes (allocator->base.da.size)));
-       allocator = (armeabisupport_allocator_mmap *)linklist_next_armeabisupport_allocator(&allocator->base))
+  armeabisupport_allocator *allocator;
+  for (allocator = (armeabisupport_allocator *)linklist_first_armeabisupport_allocator(&global.mmap_allocator_pool);
+       allocator && (addr < allocator->da.base || addr >= (allocator->da.base + pages_to_bytes (allocator->da.size)));
+       allocator = (armeabisupport_allocator *)linklist_next_armeabisupport_allocator(allocator))
        /* Empty loop. */;
 
   return allocator;
 }
 
 static inline mmap_block *
-get_block(armeabisupport_allocator_mmap *allocator, eabi_PTR addr)
+get_block(armeabisupport_allocator *allocator, eabi_PTR addr)
 {
-  int page = get_page_number(&allocator->base, addr);
+  int page = get_page_number(allocator, addr);
   mmap_block *block;
   for (block = linklist_first_mmap_block (&allocator->block_list);
        block && (page < block->start_page || page >= block->end_page);
@@ -301,12 +301,12 @@ static _kernel_oserror *convert_protection(int prot, uint32_t *access_flags_ret)
 /* We only support addr being non-null when it refers to an existing block and we are changing
  * the protection.  */
 static _kernel_oserror *
-armeabi_mmap_non_null_addr(eabi_PTR addr, size_t size, int prot, armeabisupport_allocator_mmap **allocator_ret, mmap_block **block_ret)
+armeabi_mmap_non_null_addr(eabi_PTR addr, size_t size, int prot, armeabisupport_allocator **allocator_ret, mmap_block **block_ret)
 {
   TRACE("armeabi_mmap_non_null_addr(0x%X, %d, %d)", addr, size, prot);
 
   _kernel_oserror *err;
-  armeabisupport_allocator_mmap *allocator = get_allocator(addr);
+  armeabisupport_allocator *allocator = get_allocator(addr);
   if (!allocator)
     {
       err = armeabisupport_ENOMEM;
@@ -320,7 +320,7 @@ armeabi_mmap_non_null_addr(eabi_PTR addr, size_t size, int prot, armeabisupport_
       goto error;
     }
 
-  int page = get_page_number(&allocator->base, addr);
+  int page = get_page_number(allocator, addr);
   uint32_t num_pages = bytes_to_pages(size);
 
   if (page + num_pages > block->end_page)
@@ -352,7 +352,7 @@ error:
 
 _kernel_oserror *
 armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t offset,
-	     armeabisupport_allocator_mmap **allocator_ret, mmap_block **block_ret)
+	     armeabisupport_allocator **allocator_ret, mmap_block **block_ret)
 {
   if (size == 0)
     return armeabisupport_EINVAL;
@@ -368,7 +368,7 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
 
 _kernel_oserror *
 armeabi_mmap_internal(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t offset,
-		      armeabisupport_allocator_mmap **allocator_ret, mmap_block **block_ret)
+		      armeabisupport_allocator **allocator_ret, mmap_block **block_ret)
 {
   _kernel_oserror *err;
   app_object *app;
@@ -409,7 +409,7 @@ armeabi_mmap_internal(eabi_PTR addr, size_t size, int prot, int flags, int fd, s
 	      opentable_idx,
 	      systemshm_entry->name,
 	      ot_entry->ref_count,
-	      page_to_addr(&systemshm_entry->allocator->base, systemshm_entry->block->start_page));
+	      page_to_addr(systemshm_entry->allocator, systemshm_entry->block->start_page));
 	  return NULL;
 	}
     }
@@ -444,7 +444,7 @@ armeabi_mmap_internal(eabi_PTR addr, size_t size, int prot, int flags, int fd, s
 	err = allocator_new_internal(buffer,
 				     MMAP_MAX_DA_SIZE,
 				     ALLOCATOR_TYPE_MMAP | ALLOCATOR_FLAG_GLOBAL,
-				     (void **)&allocator);
+				     &allocator);
 	if (err)
 	  {
 	    LOG("armeabi_mmap: Failed to create allocator with OS error: %s", err->errmess);
@@ -456,7 +456,7 @@ armeabi_mmap_internal(eabi_PTR addr, size_t size, int prot, int flags, int fd, s
       }
 
     mmap_block *block;
-    err = allocator_mmap((armeabisupport_allocator_mmap *)allocator,
+    err = allocator_mmap((armeabisupport_allocator *)allocator,
 			 num_pages,
 			 ALLOCATOR_ALLOC_FLAG_MAP,
 			 &block);
@@ -470,20 +470,20 @@ armeabi_mmap_internal(eabi_PTR addr, size_t size, int prot, int flags, int fd, s
 	block->prot = prot;
 	block->offset = offset;
 
-	*allocator_ret = (armeabisupport_allocator_mmap *)allocator;
+	*allocator_ret = (armeabisupport_allocator *)allocator;
 	*block_ret = block;
 
 	if (ot_entry && systemshm_entry)
 	  {
 	    block->is_shm = true;
-	    systemshm_entry->allocator = (armeabisupport_allocator_mmap *)allocator;
+	    systemshm_entry->allocator = (armeabisupport_allocator *)allocator;
 	    systemshm_entry->block = block;
 	    ot_entry->ref_count++;
 	    LOG("armeabi_mmap: shm 0x%X connecting to mmap, name=\"%s\", new ref=%d, addr=0x%X (+++)",
 		systemshm_entry,
 		systemshm_entry->name,
 		ot_entry->ref_count,
-		page_to_addr(&systemshm_entry->allocator->base, systemshm_entry->block->start_page));
+		page_to_addr(systemshm_entry->allocator, systemshm_entry->block->start_page));
 	  }
         LOG("armeabi_mmap: Allocated %d pages @ 0x%X from allocator %s\n",
 	    num_pages, page_to_addr(allocator, block->start_page), allocator->name);
@@ -502,7 +502,7 @@ armeabi_munmap(eabi_PTR addr, size_t size)
 {
   uint32_t num_pages = bytes_to_pages(size);
 
-  armeabisupport_allocator_mmap *allocator = get_allocator(addr);
+  armeabisupport_allocator *allocator = get_allocator(addr);
   if (!allocator)
     {
       LOG("armeabi_munmap: Failed to find address in allocator pool\n");
@@ -517,8 +517,8 @@ armeabi_munmap(eabi_PTR addr, size_t size)
     {
       TRACE("armeabi_munmap: Allocator %s empty, destroying to reclaim dynamic area\n", allocator->base.name);
       /* No more allocations in this allocator, remove from the pool.  */
-      linklist_remove(&global.mmap_allocator_pool, &allocator->base.link);
-      allocator_destroy_internal(&allocator->base);
+      linklist_remove(&global.mmap_allocator_pool, &allocator->link);
+      allocator_destroy_internal(allocator);
     }
 
   return NULL;
@@ -527,10 +527,10 @@ armeabi_munmap(eabi_PTR addr, size_t size)
 _kernel_oserror *
 armeabi_madvise(eabi_PTR addr, size_t size, int advice)
 {
-  armeabisupport_allocator_mmap *allocator;
-  for (allocator = (armeabisupport_allocator_mmap *)linklist_first_armeabisupport_allocator(&global.mmap_allocator_pool);
-       allocator && (addr < allocator->base.da.base || addr >= (allocator->base.da.base + pages_to_bytes (allocator->base.da.size)));
-       allocator = (armeabisupport_allocator_mmap *)linklist_next_armeabisupport_allocator(&allocator->base))
+  armeabisupport_allocator *allocator;
+  for (allocator = (armeabisupport_allocator *)linklist_first_armeabisupport_allocator(&global.mmap_allocator_pool);
+       allocator && (addr < allocator->da.base || addr >= (allocator->da.base + pages_to_bytes (allocator->da.size)));
+       allocator = (armeabisupport_allocator *)linklist_next_armeabisupport_allocator(allocator))
        /* Empty loop. */;
 
   if (!allocator)
@@ -543,13 +543,13 @@ armeabi_madvise(eabi_PTR addr, size_t size, int advice)
   uint32_t num_pages = bytes_to_pages(size);
   if (advice == MADV_DONTNEED || advice == MADV_FREE)
     {
-      if ((err = allocator_unmap_pages(&allocator->base, addr, num_pages)) == NULL)
-        err = allocator_release_pages(&allocator->base, addr, num_pages);
+      if ((err = allocator_unmap_pages(allocator, addr, num_pages)) == NULL)
+        err = allocator_release_pages(allocator, addr, num_pages);
     }
   else if (advice == MADV_WILLNEED || advice == MADV_NORMAL)
     {
-      if ((err = allocator_claim_pages(&allocator->base, addr, num_pages)) == NULL)
-	err = allocator_map_pages(&allocator->base, addr, num_pages, 0);
+      if ((err = allocator_claim_pages(allocator, addr, num_pages)) == NULL)
+	err = allocator_map_pages(allocator, addr, num_pages, 0);
     }
   else
     err = armeabisupport_EINVAL;
@@ -567,17 +567,17 @@ void mmap_cleanup_app(app_object *app)
 {
   abort_deregister(get_mmap_abort_handler(), (unsigned)&global.mmap_allocator_pool);
 
-  armeabisupport_allocator_mmap *allocator = (armeabisupport_allocator_mmap *)linklist_first_armeabisupport_allocator(&global.mmap_allocator_pool);
+  armeabisupport_allocator *allocator = (armeabisupport_allocator *)linklist_first_armeabisupport_allocator(&global.mmap_allocator_pool);
   while (allocator)
     {
-      armeabisupport_allocator_mmap *next = (armeabisupport_allocator_mmap *)linklist_next_armeabisupport_allocator(&allocator->base);
+      armeabisupport_allocator *next = (armeabisupport_allocator *)linklist_next_armeabisupport_allocator(allocator);
       allocator_mmap_cleanup_app (allocator, app);
       if (allocator->block_list.count == 0)
         {
-          TRACE("mmap_cleanup_app: Allocator %s empty, destroying to reclaim dynamic area", allocator->base.name);
+          LOG("mmap_cleanup_app: Allocator %s empty, destroying to reclaim dynamic area", allocator->name);
           /* No more allocations in this allocator, remove from the pool.  */
-          linklist_remove(&global.mmap_allocator_pool, &allocator->base.link);
-          allocator_destroy_internal(&allocator->base);
+          linklist_remove(&global.mmap_allocator_pool, &allocator->link);
+          allocator_destroy_internal(allocator);
         }
       allocator = next;
     }
@@ -590,7 +590,7 @@ armeabi_mprotect(void *addr, size_t len, int prot)
   if (!is_page_aligned(addr) || len == 0)
     return armeabisupport_EINVAL;
 
-  armeabisupport_allocator_mmap *allocator = get_allocator(addr);
+  armeabisupport_allocator *allocator = get_allocator(addr);
   if (!allocator)
     {
       LOG("armeabi_mprotect: Failed to find address in allocator pool");
@@ -621,7 +621,7 @@ armeabi_get_info(eabi_PTR addr,
       return armeabisupport_EINVAL;
     }
 
-  armeabisupport_allocator_mmap *allocator = get_allocator(addr);
+  armeabisupport_allocator *allocator = get_allocator(addr);
   if (!allocator)
     {
       LOG("armeabi_get_info: Failed to find address %p in allocator pool", addr);
@@ -631,12 +631,12 @@ armeabi_get_info(eabi_PTR addr,
   mmap_block *block = get_block(allocator, addr);
   if (!block)
     {
-      LOG("armeabi_get_info: Failed to find block containing %p in allocator %s", addr, allocator->base.name);
+      LOG("armeabi_get_info: Failed to find block containing %p in allocator %s", addr, allocator->name);
       dump_mmap_list(allocator);
       return armeabisupport_ENOMEM;
     }
 
-  *mmap_addr = page_to_addr(&allocator->base, block->start_page);
+  *mmap_addr = page_to_addr(allocator, block->start_page);
   *size = pages_to_bytes(block->end_page - block->start_page);
   *prot = block->prot;
   *flags = block->mmap_flags;
@@ -654,7 +654,7 @@ armeabi_mremap (eabi_PTR addr,
 		size_t old_len,
 		size_t new_len,
 		int flags,
-		armeabisupport_allocator_mmap **allocator_ret,
+		armeabisupport_allocator **allocator_ret,
 		mmap_block **block_ret)
 {
   _kernel_oserror *err;
@@ -666,7 +666,7 @@ armeabi_mremap (eabi_PTR addr,
       goto error;
     }
 
-  armeabisupport_allocator_mmap *allocator = get_allocator(addr);
+  armeabisupport_allocator *allocator = get_allocator(addr);
   if (!allocator)
     {
       LOG("armeabi_mremap: Failed to find address (%p) in mmap allocator pool", addr);
@@ -698,7 +698,7 @@ armeabi_mremap (eabi_PTR addr,
     }
 
   /* We can only remap a block that was fully allocated previously.  */
-  int page = get_page_number(&allocator->base, addr);
+  int page = get_page_number(allocator, addr);
   if (page != block->start_page || bytes_to_pages(old_len) != block->end_page - block->start_page)
     {
       LOG("armeabi_mremap: Non matching block, looking for (%d : %d), got (%d : %d)",
@@ -724,15 +724,15 @@ error:
 _kernel_oserror *
 armeabi_get_page_protection (eabi_PTR addr, int *prot_ret)
 {
-  armeabisupport_allocator_mmap *allocator = get_allocator(addr);
-  int page = get_page_number(&allocator->base, addr);
+  armeabisupport_allocator *allocator = get_allocator(addr);
+  int page = get_page_number(allocator, addr);
 
   pmp_page_info_entry entry;
   entry.pmp_page_index = page;
   entry.physical_page_number = -1;
   entry.da_page_number = -1;
   entry.flags = 0;
-  _kernel_oserror *err = dynamic_pmp_page_info(allocator->base.da.number, &entry, 1);
+  _kernel_oserror *err = dynamic_pmp_page_info(allocator->da.number, &entry, 1);
   if (err || entry.da_page_number == -1)
     {
       LOG("armeabi_get_page_protection: dynamic_pmp_page_info error: %s", err->errmess);
@@ -764,7 +764,7 @@ armeabi_msync (eabi_PTR addr,
   if ((unsigned)addr & PAGE_SIZE_MASK)
     return armeabisupport_EINVAL;
 
-  armeabisupport_allocator_mmap *allocator = get_allocator(addr);
+  armeabisupport_allocator *allocator = get_allocator(addr);
   if (!allocator)
     {
       LOG("%s: Failed to find address (%p) in mmap allocator pool", __func__, addr);
@@ -803,7 +803,7 @@ armeabi_msync (eabi_PTR addr,
        st_entry,
        st_entry->filename,
        block->opentable_idx,
-       page_to_addr(&allocator->base, block->start_page),
+       page_to_addr(allocator, block->start_page),
        pages_to_bytes(block->end_page - block->start_page),
        ot_entry->ref_count,
        st_entry->table_base.ref_count);
@@ -813,7 +813,7 @@ armeabi_msync (eabi_PTR addr,
   int bytes_not_written;
   _kernel_oserror *err;
   err = systemfiletable_write_bytes(ot_entry->systemtable_idx,
-				    page_to_addr(&allocator->base, block->start_page),
+				    page_to_addr(allocator, block->start_page),
 				    pages_to_bytes(block->end_page - block->start_page),
 				    &offset,
 				    &bytes_not_written);

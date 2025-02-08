@@ -156,7 +156,7 @@ _kernel_oserror *opentable_add_shm(int systemtable_idx,
   return err;
 }
 
-_kernel_oserror *opentable_unmap_shm(armeabisupport_allocator_mmap *allocator,
+_kernel_oserror *opentable_unmap_shm(armeabisupport_allocator *allocator,
 				     mmap_block *block)
 {
   TRACE("%s: opentable_idx=%d", __func__, block->opentable_idx);
@@ -233,7 +233,7 @@ static void opentable_log_shm_entry(opentable_entry *ot_entry)
 		  ot_entry->systemtable_idx);
   reporter_printf("                   SYSTEM: REF:%3d ADDR:%10X NAME:%s",
 		  system_entry->table_base.ref_count,
-		  page_to_addr(&system_entry->allocator->base, system_entry->block->start_page),
+		  page_to_addr(system_entry->allocator, system_entry->block->start_page),
 		  system_entry->name);
 }
 

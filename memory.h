@@ -1,6 +1,6 @@
 /* memory.h
  *
- * Copyright 2019, 2020 GCCSDK Developers
+ * Copyright 2019-2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -19,14 +19,14 @@
 #define PAGE_SIZE_MASK 0xfff
 
 #define ALLOCATOR_TYPE_MASK		0xF
+#define ALLOCATOR_TYPE_MMAP		0
 #define ALLOCATOR_TYPE_PAGE		1
 #define ALLOCATOR_TYPE_HEAP		2
 #define ALLOCATOR_TYPE_SINGLE_USE	3
-#define ALLOCATOR_TYPE_MMAP		4
 #define ALLOCATOR_FLAG_GLOBAL		(1 << 5)
 #define ALLOCATOR_FLAG_ABORTTRAP	(1 << 6)
 
-#define ALLOCATOR_VALIDATE_VALUE 0x58494E55	/* "UNIX" in ASCII.  */
+#define ALLOCATOR_VALIDATE_VALUE	0x58494E55	/* "UNIX" in ASCII.  */
 
 #define MEMORYOP_NEW_ALLOCATOR		0
 #define MEMORYOP_DESTROY_ALLOCATOR 	1
@@ -53,7 +53,46 @@
 
 #define ALLOCATOR_HEAP_INITIAL_SIZE	4096
 
+typedef enum _allocator_type
+{
+  allocator_type_INVALID = -1,
+  allocator_type_MMAP = 0,
+  allocator_type_PAGE,
+  allocator_type_HEAP,
+  allocator_type_SINGLE,
+  allocator_type_MAX
+
+} allocator_type;
+
 typedef struct _armeabisupport_allocator armeabisupport_allocator;
+
+typedef struct _virtual_function_table
+{
+  _kernel_oserror * (*new)(armeabisupport_allocator *);
+  void (*destroy)(armeabisupport_allocator *);
+  _kernel_oserror * (*alloc)(armeabi_allocator_t, size_t size, unsigned flags, eabi_PTR *ret);
+  _kernel_oserror * (*free)(armeabi_allocator_t, eabi_PTR block, size_t size);
+  void (*dump)(armeabisupport_allocator *);
+#if VALIDATE_VT
+  uint32_t magic;
+#endif
+} virtual_function_table;
+
+typedef struct _armeabisupport_allocator
+{
+  link_hdr link;
+  unsigned validate;
+  dynamicarea_block da;
+  unsigned flags;
+  allocator_type type;
+  const virtual_function_table *vt;
+
+  /* Used by paged and mmap allocators.  */
+  link_list block_list;
+
+  char name[ALLOCATOR_NAME_MAX_LEN];
+} armeabisupport_allocator;
+LINKLIST_ACCESS_FUNCTIONS (armeabisupport_allocator)
 
 _kernel_oserror *
 memory_op(_kernel_swi_regs * r);
@@ -108,30 +147,30 @@ allocator_unmap_pages (armeabisupport_allocator *allocator,
 		       unsigned num_pages);
 
 _kernel_oserror *
-allocator_mmap (armeabisupport_allocator_mmap *allocator,
+allocator_mmap (armeabisupport_allocator *allocator,
 		const int required_page_count,
 		unsigned flags,
 		mmap_block **block_ret);
 
 /* Unmap and free memory where we already know the block.  */
 _kernel_oserror *
-allocator_munmap_block(armeabisupport_allocator_mmap *allocator,
+allocator_munmap_block(armeabisupport_allocator *allocator,
 		       mmap_block *block);
 
 /* Unmap and free memory where we have an address and the number of pages.  */
 _kernel_oserror *
-allocator_munmap(armeabisupport_allocator_mmap *handle,
+allocator_munmap(armeabisupport_allocator *handle,
 		 eabi_PTR block, size_t num_pages);
 _kernel_oserror *
-allocator_mremap(armeabisupport_allocator_mmap *allocator,
+allocator_mremap(armeabisupport_allocator *allocator,
 		 mmap_block *block,
 		 int page_diff,
 		 uint32_t flags,
-		 armeabisupport_allocator_mmap **allocator_ret,
+		 armeabisupport_allocator **allocator_ret,
 		 mmap_block **block_ret);
 
 _kernel_oserror *
-allocator_change_protection(armeabisupport_allocator_mmap *allocator,
+allocator_change_protection(armeabisupport_allocator *allocator,
 			    eabi_PTR addr,
 			    size_t num_pages,
 			    uint32_t flags);
@@ -140,7 +179,7 @@ void allocator_destroy_all(link_list *list);
 
 /* Remove any mmap allocations from the given allocator for the given app.  */
 void
-allocator_mmap_cleanup_app(armeabisupport_allocator_mmap *allocator,
+allocator_mmap_cleanup_app(armeabisupport_allocator *allocator,
 			   app_object *app);
 
 static inline size_t

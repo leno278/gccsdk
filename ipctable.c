@@ -98,7 +98,7 @@ _kernel_oserror *systemipctable_deref_ipc(int systemtable_idx)
   return NULL;
 }
 
-_kernel_oserror *opentable_unmap_ipc(armeabisupport_allocator_mmap *allocator,
+_kernel_oserror *opentable_unmap_ipc(armeabisupport_allocator *allocator,
 				     mmap_block *block)
 {
   /* NOOP  */
@@ -142,8 +142,8 @@ void systemipctable_print(void)
 	  printf("%-4d %-3d %-10s %-10X\n",
 		 i,
 		 entry[i].table_base.ref_count,
-		 entry[i].allocator->base.name,
-		 (unsigned)page_to_addr(&entry[i].allocator->base,
+		 entry[i].allocator->name,
+		 (unsigned)page_to_addr(entry[i].allocator,
 					entry[i].block->start_page));
 	}
     }

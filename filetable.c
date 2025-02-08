@@ -414,7 +414,7 @@ _kernel_oserror *opentable_add_file(int systemtable_idx, int flags, int mode, in
   return err;
 }
 
-_kernel_oserror *opentable_unmap_file(armeabisupport_allocator_mmap *allocator,
+_kernel_oserror *opentable_unmap_file(armeabisupport_allocator *allocator,
 				      mmap_block *block)
 {
   TRACE("%s: opentable_idx=%d", __func__, block->opentable_idx);
@@ -442,7 +442,7 @@ _kernel_oserror *opentable_unmap_file(armeabisupport_allocator_mmap *allocator,
   int bytes_not_written;
   _kernel_oserror *err;
   err = systemfiletable_write_bytes(ot_entry->systemtable_idx,
-				    page_to_addr(&allocator->base, block->start_page),
+				    page_to_addr(allocator, block->start_page),
 				    pages_to_bytes(block->end_page - block->start_page),
 				    &offset,
 				    &bytes_not_written);

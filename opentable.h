@@ -25,7 +25,7 @@ typedef enum _opentable_type
 typedef struct _opentable_methods
 {
   _kernel_oserror *(*deref_system)(int);
-  _kernel_oserror *(*unmap)(armeabisupport_allocator_mmap *allocator,
+  _kernel_oserror *(*unmap)(armeabisupport_allocator *allocator,
 			    mmap_block *block);
   void (*log)(struct _opentable_entry *ot_entry);
 

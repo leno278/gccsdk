@@ -10,6 +10,7 @@
 #include "table_entry_base.h"
 #include "types.h"
 #include "lock.h"
+#include "memory.h"
 #include <unistd.h>
 #include <swi.h>
 
@@ -68,7 +69,7 @@ systemfiletable_get_info(int filetable_idx,
 _kernel_oserror *systemfiletable_get_file_length(int filetable_idx, off_t *length);
 _kernel_oserror *systemfiletable_read_bytes(int systemtable_idx, void *buf, size_t count, off_t *, int *bytes_not_read);
 _kernel_oserror *systemfiletable_write_bytes(int systemtable_idx, void *buf, size_t count, off_t *, int *bytes_not_written);
-_kernel_oserror *opentable_unmap_file(armeabisupport_allocator_mmap *allocator,
+_kernel_oserror *opentable_unmap_file(armeabisupport_allocator *allocator,
 				      mmap_block *block);
 const char *openfiletable_get_filename(int opentable_idx);
 

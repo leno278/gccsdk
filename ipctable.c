@@ -14,7 +14,7 @@
 #define ENABLE_TRACING 0
 #include "trace.h"
 
-#define ENABLE_LOGGING 0
+#define ENABLE_LOGGING 1
 #include "log.h"
 
 static void opentable_log_ipc_entry(opentable_entry *ot_entry);
@@ -81,11 +81,11 @@ _kernel_oserror *systemipctable_deref_ipc(int systemtable_idx)
   entry->table_base.ref_count--;
   LOG("%s:   System table ref count now %d for IPC (%X)", __func__,
       entry->table_base.ref_count,
-      entry->block ? page_to_addr(&entry->allocator->base, entry->block->start_page) : NULL);
+      entry->block ? page_to_addr(entry->allocator, entry->block->start_page) : NULL);
   if (entry->table_base.ref_count == 0)
     {
       LOG("%s:   Destroying IPC system table entry %X", __func__,
-	  entry->block ? page_to_addr(&entry->allocator->base, entry->block->start_page) : NULL);
+	  entry->block ? page_to_addr(entry->allocator, entry->block->start_page) : NULL);
       if (entry->allocator && entry->block)
 	{
 	  allocator_munmap_block(entry->allocator, entry->block);
@@ -207,8 +207,8 @@ void systemipctable_log(void)
 	  reporter_printf("%4d %3d %10s %10X\n",
 			  i,
 			  entry[i].table_base.ref_count,
-			  entry[i].allocator->base.name,
-			  page_to_addr(&entry[i].allocator->base, entry[i].block->start_page));
+			  entry[i].allocator->name,
+			  page_to_addr(entry[i].allocator, entry[i].block->start_page));
 	}
     }
 }

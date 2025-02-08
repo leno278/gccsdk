@@ -18,7 +18,7 @@
 #define ENABLE_TRACING 0
 #include "trace.h"
 
-#define ENABLE_LOGGING 0
+#define ENABLE_LOGGING 1
 #include "log.h"
 
 #define OBJECT_TYPE_ERROR -1
@@ -432,7 +432,7 @@ _kernel_oserror *opentable_unmap_file(armeabisupport_allocator *allocator,
        st_entry,
        st_entry->filename,
        block->opentable_idx,
-       page_to_addr(&allocator->base, block->start_page),
+       page_to_addr(allocator, block->start_page),
        pages_to_bytes(block->end_page - block->start_page),
        ot_entry->ref_count,
        st_entry->table_base.ref_count);

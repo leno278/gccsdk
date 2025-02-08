@@ -16,7 +16,7 @@
 #define ENABLE_TRACING 0
 #include "trace.h"
 
-#define ENABLE_LOGGING 0
+#define ENABLE_LOGGING 1
 #include "log.h"
 
 static void opentable_log_shm_entry(opentable_entry *ot_entry);
@@ -104,7 +104,7 @@ _kernel_oserror *systemshmtable_deref_shm(int systemtable_idx)
       LOG("%s:   Ref count now %d for system table entry %s (%X)", __func__,
 	  entry->table_base.ref_count,
 	  entry->name,
-	  entry->block ? page_to_addr(&entry->allocator->base, entry->block->start_page) : NULL);
+	  entry->block ? page_to_addr(entry->allocator, entry->block->start_page) : NULL);
       if (entry->table_base.ref_count == 0)
 	{
 	  LOG("%s:   Destroying system table entry %s", __func__, entry->name);
@@ -174,7 +174,7 @@ _kernel_oserror *opentable_unmap_shm(armeabisupport_allocator *allocator,
        st_entry,
        st_entry->name,
        block->opentable_idx,
-       page_to_addr(&st_entry->allocator->base, st_entry->block->start_page),
+       page_to_addr(st_entry->allocator, st_entry->block->start_page),
        pages_to_bytes(st_entry->block->end_page - st_entry->block->start_page),
        ot_entry->ref_count,
        st_entry->table_base.ref_count);
@@ -270,7 +270,7 @@ void systemshmtable_log(void)
 	  reporter_printf("%4d %4d %10X %10X %s\n",
 			  i,
 			  entry[i].table_base.ref_count,
-			  page_to_addr(&entry[i].allocator->base, entry[i].block->start_page),
+			  page_to_addr(entry[i].allocator, entry[i].block->start_page),
 			  pages_to_bytes(entry[i].block->end_page - entry[i].block->start_page),
 			  entry[i].name);
 	}

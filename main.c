@@ -137,12 +137,13 @@ armeabi_cleanup(void)
 
   fdtable_destroy(&app->fd_table);
   array_dtor(&app->fd_table);
-  linklist_remove(&global.app_list, &app->link);
 
   /* Remove all remaining mmap allocations for this app.  */
   mmap_cleanup_app(app);
 
   allocator_destroy_all(&app->allocator_list);
+
+  linklist_remove(&global.app_list, &app->link);
 
   rma_free(app);
 
@@ -216,8 +217,7 @@ void reporter_printf(const char *format, ...)
   struct tm *tmp;
 
   app_object *app;
-  if (app_find(&app) != NULL)
-    return;
+  app_find(&app);
 
   va_list ap;
   va_start (ap, format);
@@ -226,8 +226,11 @@ void reporter_printf(const char *format, ...)
   tmp = localtime(&t);
 
   *p++ = '[';
-  p += snprintf(p, sizeof(buffer) - strlen(buffer) - 1, "%s", app->name);
-  *p++ = ':';
+  if (app)
+    {
+      p += snprintf(p, sizeof(buffer) - strlen(buffer) - 1, "%s", app->name);
+      *p++ = ':';
+    }
   p += strftime(p, sizeof(buffer) - strlen(buffer) - 1, "%d/%m  %T", tmp);
   *p++ = ']';
   *p++ = ' ';

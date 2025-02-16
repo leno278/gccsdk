@@ -565,7 +565,7 @@ _kernel_oserror *fdtable_open_ipc(size_t size, int fd_ret[2])
 
   systemipctable_entry *sysipc_entry = (systemipctable_entry *)array_get_entry_ptr(&global.system_table[fd_type_IPC],
 										   sysipctbl_idx);
-  eabi_PTR write_buffer = page_to_addr(sysipc_entry->allocator, sysipc_entry->block->start_page);
+  eabi_PTR write_buffer = page_to_addr(&sysipc_entry->allocator->da, sysipc_entry->block->start_page);
   eabi_PTR read_buffer = write_buffer + size;
 
   LOG("%s:  fd1=%d, fd2=%d, write_buffer=%X, read_buffer=%X",

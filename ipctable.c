@@ -81,11 +81,11 @@ _kernel_oserror *systemipctable_deref_ipc(int systemtable_idx)
   entry->table_base.ref_count--;
   LOG("%s:   System table ref count now %d for IPC (%X)", __func__,
       entry->table_base.ref_count,
-      entry->block ? page_to_addr(entry->allocator, entry->block->start_page) : NULL);
+      entry->block ? page_to_addr(&entry->allocator->da, entry->block->start_page) : NULL);
   if (entry->table_base.ref_count == 0)
     {
       LOG("%s:   Destroying IPC system table entry %X", __func__,
-	  entry->block ? page_to_addr(entry->allocator, entry->block->start_page) : NULL);
+	  entry->block ? page_to_addr(&entry->allocator->da, entry->block->start_page) : NULL);
       if (entry->allocator && entry->block)
 	{
 	  allocator_munmap_block(entry->allocator, entry->block);
@@ -143,7 +143,7 @@ void systemipctable_print(void)
 		 i,
 		 entry[i].table_base.ref_count,
 		 entry[i].allocator->name,
-		 (unsigned)page_to_addr(entry[i].allocator,
+		 (unsigned)page_to_addr(&entry[i].allocator->da,
 					entry[i].block->start_page));
 	}
     }
@@ -208,7 +208,7 @@ void systemipctable_log(void)
 			  i,
 			  entry[i].table_base.ref_count,
 			  entry[i].allocator->name,
-			  page_to_addr(entry[i].allocator, entry[i].block->start_page));
+			  page_to_addr(&entry[i].allocator->da, entry[i].block->start_page));
 	}
     }
 }

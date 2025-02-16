@@ -432,7 +432,7 @@ _kernel_oserror *opentable_unmap_file(armeabisupport_allocator *allocator,
        st_entry,
        st_entry->filename,
        block->opentable_idx,
-       page_to_addr(allocator, block->start_page),
+       page_to_addr(&allocator->da, block->start_page),
        pages_to_bytes(block->end_page - block->start_page),
        ot_entry->ref_count,
        st_entry->table_base.ref_count);
@@ -442,7 +442,7 @@ _kernel_oserror *opentable_unmap_file(armeabisupport_allocator *allocator,
   int bytes_not_written;
   _kernel_oserror *err;
   err = systemfiletable_write_bytes(ot_entry->systemtable_idx,
-				    page_to_addr(allocator, block->start_page),
+				    page_to_addr(&allocator->da, block->start_page),
 				    pages_to_bytes(block->end_page - block->start_page),
 				    &offset,
 				    &bytes_not_written);

@@ -126,23 +126,23 @@ allocator_free(armeabi_allocator_t handle,
 	       eabi_PTR block);
 
 _kernel_oserror *
-allocator_claim_pages(armeabisupport_allocator *allocator,
+allocator_claim_pages(dynamicarea_block *,
 		      eabi_PTR first_page_address,
 		      unsigned num_pages);
 
 _kernel_oserror *
-allocator_release_pages(armeabisupport_allocator *allocator,
+allocator_release_pages(dynamicarea_block *,
 		        eabi_PTR first_page_address,
 		        unsigned num_pages);
 
 _kernel_oserror *
-allocator_map_pages (armeabisupport_allocator *allocator,
+allocator_map_pages (dynamicarea_block *,
 		     eabi_PTR address,
 		     unsigned int num_pages,
 		     unsigned flags);
 
 _kernel_oserror *
-allocator_unmap_pages (armeabisupport_allocator *allocator,
+allocator_unmap_pages (dynamicarea_block *,
 		       eabi_PTR address,
 		       unsigned num_pages);
 
@@ -218,16 +218,16 @@ static inline int is_page_aligned(eabi_PTR addr)
   return ((unsigned)addr & (PAGE_SIZE - 1)) == 0;
 }
 
-static inline eabi_PTR page_to_addr(armeabisupport_allocator *allocator, uint32_t page)
+static inline eabi_PTR page_to_addr(dynamicarea_block *da, uint32_t page)
 {
-  return allocator->da.base + pages_to_bytes(page);
+  return da->base + pages_to_bytes(page);
 }
 
 static inline int
-get_page_number(armeabisupport_allocator *allocator,
+get_page_number(dynamicarea_block *da,
 		eabi_PTR address)
 {
-  return (address - (eabi_PTR)allocator->da.base) >> PAGE_SHIFT;
+  return (address - (eabi_PTR)da->base) >> PAGE_SHIFT;
 }
 
 extern void allocator_dump_all(link_list *list);

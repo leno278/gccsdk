@@ -160,11 +160,11 @@ stack_alloc(unsigned page_count, unsigned num_guard_pages, const char *name,
     goto error__claimed;
 #else
   /* Just claim/map the page at the top of the stack.  */
-  err = allocator_claim_pages(allocator, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
+  err = allocator_claim_pages(&allocator->da, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
   if (err)
     goto error__alloced;
 
-  err = allocator_map_pages(allocator, block + ((num_pages_required - 1) << PAGE_SHIFT), 1, PMP_MEM_ACCESS_RWE_RWE);
+  err = allocator_map_pages(&allocator->da, block + ((num_pages_required - 1) << PAGE_SHIFT), 1, PMP_MEM_ACCESS_RWE_RWE);
   if (err)
     goto error__claimed;
 #endif
@@ -201,9 +201,9 @@ stack_alloc(unsigned page_count, unsigned num_guard_pages, const char *name,
   return NULL;
 
 error__mapped:
-  allocator_unmap_pages(allocator, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
+  allocator_unmap_pages(&allocator->da, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
 error__claimed:
-  allocator_release_pages(allocator, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
+  allocator_release_pages(&allocator->da, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
 error__alloced:
 #if NO_STACK_ABORT_HANDLER
   allocator_free(allocator, block);

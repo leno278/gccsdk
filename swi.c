@@ -1,6 +1,6 @@
 /* swi.c
  *
- * Copyright 2019-2024 GCCSDK Developers
+ * Copyright 2019-2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -17,7 +17,7 @@ static _kernel_oserror *
 dynamic_area_create_pmp(const char *name,
 			int max_size,
 			unsigned type,
-			dynamicarea_block *ret)
+			dynamicarea *ret)
 {
   _kernel_oserror *err;
   _kernel_swi_regs regs;
@@ -56,7 +56,7 @@ dynamic_area_create_pmp(const char *name,
 static _kernel_oserror *
 dynamic_area_create_non_pmp(const char *name, int max_size,
 			    unsigned type,
-			    dynamicarea_block *ret)
+			    dynamicarea *ret)
 {
   _kernel_oserror *err;
   _kernel_swi_regs regs;
@@ -95,7 +95,7 @@ dynamic_area_create_non_pmp(const char *name, int max_size,
 _kernel_oserror *
 dynamic_area_create (const char *name, int max_size,
 		     unsigned type,
-		     dynamicarea_block *ret)
+		     dynamicarea *ret)
 {
   return (type == ALLOCATOR_TYPE_PAGE || type == ALLOCATOR_TYPE_MMAP) ?
       dynamic_area_create_pmp(name, max_size, type, ret) :

@@ -13,6 +13,7 @@
 #include "fdtable.h"
 #include "shmtable.h"
 #include "opentable.h"
+#include "dynamicarea.h"
 #include "swi.h"
 #include "types.h"
 
@@ -51,9 +52,6 @@ static const virtual_function_table name##_virtual_funcs = \
 static _kernel_oserror *
 allocator_free_internal (armeabisupport_allocator *allocator,
 			 memblock *block);
-
-static _kernel_oserror *
-heap_alloc (armeabisupport_allocator *allocator, int size, eabi_PTR *block_ret);
 
 static bool allocator_exists(armeabisupport_allocator *);
 static armeabisupport_allocator *allocator_from_address(eabi_PTR addr);
@@ -222,7 +220,7 @@ memory_op(_kernel_swi_regs *r)
       unsigned num_pages = (unsigned)r->r[3];
 
       err = (page_allocator_valid((armeabisupport_allocator *)r->r[1]) && addr != NULL && num_pages != 0) ?
-		allocator_claim_pages(&((armeabisupport_allocator *)r->r[1])->da, addr, num_pages) :
+		dynamicarea_claim_pages(&((armeabisupport_allocator *)r->r[1])->da, addr, num_pages) :
 		armeabisupport_bad_param;
       break;
     }
@@ -231,7 +229,7 @@ memory_op(_kernel_swi_regs *r)
       unsigned num_pages = (unsigned)r->r[3];
 
       err = (page_allocator_valid((armeabisupport_allocator *)r->r[1]) && addr != NULL && num_pages != 0) ?
-		allocator_release_pages(&((armeabisupport_allocator *)r->r[1])->da, addr, num_pages) :
+		dynamicarea_release_pages(&((armeabisupport_allocator *)r->r[1])->da, addr, num_pages) :
 		armeabisupport_bad_param;
       break;
     }
@@ -240,7 +238,7 @@ memory_op(_kernel_swi_regs *r)
       unsigned num_pages = (unsigned)r->r[3];
 
       err = (page_allocator_valid((armeabisupport_allocator *)r->r[1]) && addr != NULL && num_pages != 0) ?
-		allocator_map_pages(&((armeabisupport_allocator *)r->r[1])->da, addr, num_pages, (unsigned)r->r[4]) :
+		dynamicarea_map_pages(&((armeabisupport_allocator *)r->r[1])->da, addr, num_pages, (unsigned)r->r[4]) :
 		armeabisupport_bad_param;
       break;
     }
@@ -249,7 +247,7 @@ memory_op(_kernel_swi_regs *r)
       unsigned num_pages = (unsigned)r->r[3];
 
       err = (page_allocator_valid((armeabisupport_allocator *)r->r[1]) && addr != NULL && num_pages != 0) ?
-		allocator_unmap_pages(&((armeabisupport_allocator *)r->r[1])->da, addr, num_pages) :
+		dynamicarea_unmap_pages(&((armeabisupport_allocator *)r->r[1])->da, addr, num_pages) :
 		armeabisupport_bad_param;
       break;
     }
@@ -354,289 +352,6 @@ memory_op(_kernel_swi_regs *r)
   return err;
 }
 
-static _kernel_oserror *
-heap_alloc (armeabisupport_allocator *allocator, int size, eabi_PTR *block_ret)
-{
-  bool heap_extended = false;
-  _kernel_oserror *err = NULL;
-
-  while (true)
-    {
-      /* If this fails, then assume heap is full. The failure could be due
-         to a corrupted heap or invalid r1, but we can't distinguish
-         here.  */
-      err = heap_claim (allocator->da.base, size, (void **)block_ret);
-
-      if (err || *block_ret == NULL)
-	{
-	  if (heap_extended)
-	    {
-	      /* If we've already extended the heap and it still fails,
-	         then don't try again, return the error.  */
-	      if (!err)
-		err = armeabisupport_no_memory;
-
-	      return err;
-	    }
-
-	  /* Attempt to increase heap size and try again. */
-	  int heap_inc = page_align_size(size * 2);
-
-	  /* Extend DA by (((allocation request * 2) + 0xfff) & ~0xfff)  */
-	  if ((err = dynamic_area_extend (allocator->da.number, heap_inc)) != NULL)
-	    {
-	      DEBUG_OUTPUT_SWI_ERROR(err);
-	      return err;
-	    }
-	  allocator->da.size += bytes_to_pages (heap_inc);
-
-	  /* Extend heap by same amount.  */
-	  if ((err = heap_extend (allocator->da.base, heap_inc)) != NULL)
-	    return err;
-
-	  heap_extended = true;
-	}
-      else
-	break;
-    }
-
-  return NULL;
-}
-
-_kernel_oserror *
-allocator_claim_pages (dynamicarea_block *da,
-		       eabi_PTR address,
-		       unsigned num_pages)
-{
-  pmp_phy_page_entry *list;
-  _kernel_oserror *err;
-  int i, pmp_index;
-
-  if ((err = rma_claim(sizeof(*list) * num_pages, (void **)&list)) != NULL)
-    return err;
-
-  for (i = 0, pmp_index = get_page_number(da, address);
-       i < num_pages;
-       i++, pmp_index++)
-    {
-      list[i].pmp_page_index = pmp_index;
-      list[i].physical_page_number = PMP_PAGE_KERNEL_CHOICE;
-      list[i].flags = 0;
-    }
-
-#if DEBUG_ALLOCATOR
-  DEBUG_OUTPUT("%s - address: %p, num_pages: %d, pages %d to %d",
-		__func__,address,num_pages,
-		get_page_number(da, address),
-		get_page_number(da, address) + (num_pages - 1));
-#endif
-
-  err = dynamic_pmp_claim_release (da->number,
-				   list,
-				   num_pages);
-  rma_free (list);
-
-  if (err)
-    {
-      DEBUG_OUTPUT_SWI_ERROR(err);
-    }
-
-  return err;
-}
-
-_kernel_oserror *
-allocator_release_pages (dynamicarea_block *da,
-			 eabi_PTR address,
-			 unsigned num_pages)
-{
-  pmp_phy_page_entry *list;
-  _kernel_oserror *err;
-  int i, pmp_index;
-
-  if ((err = rma_claim(sizeof(*list) * num_pages, (void **)&list)) != NULL)
-    return err;
-
-  for (i = 0, pmp_index = get_page_number(da, address);
-       i < num_pages;
-       i++, pmp_index++)
-    {
-      list[i].pmp_page_index = pmp_index;
-      list[i].physical_page_number = PMP_PAGE_RELEASE;
-      list[i].flags = 0;
-    }
-
-#if DEBUG_ALLOCATOR
-  DEBUG_OUTPUT("%s - address: %p, num_pages: %d, pages %d to %d",
-		__func__,address,num_pages,
-		get_page_number(da, address),
-		get_page_number(da, address) + (num_pages - 1));
-#endif
-
-  err = dynamic_pmp_claim_release (da->number,
-				   list,
-				   num_pages);
-  rma_free(list);
-
-  if (err)
-    {
-      DEBUG_OUTPUT_SWI_ERROR(err);
-    }
-
-  return err;
-}
-
-_kernel_oserror *
-allocator_map_pages (dynamicarea_block *da,
-		     eabi_PTR address,
-		     unsigned num_pages,
-		     unsigned flags)
-{
-  pmp_log_page_entry *list;
-  _kernel_oserror *err;
-  int i, pmp_index, da_page_num;
-
-  if ((err = rma_claim(sizeof(*list) * num_pages, (void **)&list)) != NULL)
-    return err;
-
-  for (i = 0,
-        pmp_index = get_page_number(da, address),
-        da_page_num = get_page_number(da, address);
-       i < num_pages;
-       i++, pmp_index++, da_page_num++)
-    {
-      list[i].da_page_number = da_page_num;
-      list[i].pmp_page_index = pmp_index;
-      list[i].flags = flags;
-    }
-
-#if DEBUG_ALLOCATOR
-  DEBUG_OUTPUT("%s - address: %p, num_pages: %d, pages %d to %d",
-		__func__, address, num_pages,
-		get_page_number(da, address),
-		get_page_number(da, address) + num_pages - 1);
-#endif
-
-  err = dynamic_pmp_map_unmap (da->number,
-			       list,
-			       num_pages);
-  rma_free(list);
-
-  if (err)
-    {
-/*      log_printf(LOG_REPORT,"name: %s, base: 0x%X, max_pages: %d",allocator.base->name,allocator.base->da.base,allocator.base->da.max_size);
-      log_printf(LOG_REPORT,"address: 0x%X",address);
-      log_printf(LOG_REPORT,"page_number: %d",get_page_number(&allocator.base, address));
-      log_printf(LOG_REPORT,"num_pages: 0x%X",num_pages);*/
-      DEBUG_OUTPUT_SWI_ERROR(err);
-    }
-
-  return err;
-}
-
-_kernel_oserror *
-allocator_unmap_pages (dynamicarea_block *da,
-		       eabi_PTR address,
-		       unsigned num_pages)
-{
-  pmp_log_page_entry *list;
-  _kernel_oserror *err;
-  int i, pmp_index, da_page_num;
-
-  if ((err = rma_claim(sizeof(*list) * num_pages, (void **)&list)) != NULL)
-    return err;
-
-  for (i = 0,
-        pmp_index = get_page_number(da, address),
-        da_page_num = get_page_number(da, address);
-       i < num_pages;
-       i++, pmp_index++, da_page_num++)
-    {
-      list[i].da_page_number = da_page_num;
-      list[i].pmp_page_index = PMP_PAGE_UNMAP;
-      list[i].flags = 0;
-    }
-
-#if DEBUG_ALLOCATOR
-  DEBUG_OUTPUT("%s - address: %p, num_pages: %d, pages %d to %d",
-	       __func__,
-	       address, num_pages,
-	       get_page_number(da, address),
-	       get_page_number(da, address) + num_pages - 1);
-#endif
-
-  err = dynamic_pmp_map_unmap (da->number,
-			       list,
-			       num_pages);
-  rma_free(list);
-
-  if (err)
-    {
-      DEBUG_OUTPUT_SWI_ERROR(err);
-    }
-
-  return err;
-}
-
-static _kernel_oserror *
-DA_extend (dynamicarea_block *da, int by, void **block)
-{
-  bool heap_extended = false;
-  _kernel_oserror *err = NULL;
-
-  while (true)
-    {
-      /* If this fails, then assume heap is full and attempt to extend it
-         (only for +ve extends though). The failure could be due to a
-         corrupted heap or invalid heap pointer, but we can't distinguish
-         here.  */
-      err = heap_extend_block (da->base, block, by);
-
-      /* If an error occurs, then block is not changed, ie it will not be
-         NULL.  */
-      if (err)
-	{
-	  if (heap_extended)
-	    {
-	      /* If we've already extended the heap and it still fails,
-	         then don't try again, return the error.  */
-	      if (!err)
-		err = armeabisupport_no_memory;
-
-	      return err;
-	    }
-
-	  /* Attempt to increase heap size and try again.
-	     Extend by the size of the block as well as the extra in case
-	     the block needs to be moved.  */
-	  size_t heap_inc;
-
-	  if ((err = heap_block_size (da->base, *block,
-				      &heap_inc)) != NULL)
-	    return err;
-
-	  /* Add on the extra and round to page size.  */
-	  heap_inc = page_align_size(heap_inc + by);
-
-	  if ((err = dynamic_area_extend (da->number, heap_inc)) != NULL)
-	    {
-	      DEBUG_OUTPUT("%s:%d - RISC OS Error: %s", __func__, __LINE__, err->errmess);
-	      return err;
-	    }
-	  da->size += bytes_to_pages (heap_inc);
-
-	  /* Extend heap by same amount.  */
-	  if ((err = heap_extend (da->base, heap_inc)) != NULL)
-	    return err;
-
-	  heap_extended = true;
-	}
-      else
-	break;
-    }
-
-  return NULL;
-}
-
 _kernel_oserror *
 allocator_new (const char *name,
 	       int max_size,
@@ -719,57 +434,6 @@ error:
   rma_free(allocator);
   if (allocator_ret)
     *allocator_ret = NULL;
-
-  return err;
-}
-
-/* Step through the pages one by one checking if they're mapped,
- * and releasing and unmapping them if they are.  */
-static _kernel_oserror *
-unmap_release_pages(dynamicarea_block *da,
-		    int page,
-		    size_t num_pages)
-{
-  _kernel_oserror *err = NULL;
-  pmp_page_info_entry entry;
-  int page_entry[3];
-
-#if DEBUG_ALLOCATOR
-  DEBUG_OUTPUT("  unmap_release_pages(addr=%p, num_pages=%d)",
-	       page_to_addr(da, page),
-	       num_pages);
-#endif
-
-  if (num_pages < 0)
-    return armeabisupport_page_map_error;
-
-  while (num_pages--)
-  {
-#if DEBUG_ALLOCATOR
-    DEBUG_OUTPUT("  unmap_release_pages(page=%d)", page);
-#endif
-    entry.pmp_page_index = page;//-1;
-    entry.physical_page_number = -1;
-    entry.da_page_number = -1;//page;
-    entry.flags = 0;
-    err = dynamic_pmp_page_info(da->number, &entry, 1);
-
-    if (!err && entry.da_page_number != -1)
-    {
-      page_entry[0] = page;
-      page_entry[1] = PMP_PAGE_UNMAP; /* Happens to be same as PMP_PAGE_RELEASE.  */
-      page_entry[2] = 0;
-      if ((err = dynamic_pmp_map_unmap(da->number, (pmp_log_page_entry *)page_entry, 1)) == NULL)
-	err = dynamic_pmp_claim_release(da->number, (pmp_phy_page_entry *)page_entry, 1);
-    }
-
-    if (err)
-      {
-        DEBUG_OUTPUT_SWI_ERROR(err);
-      }
-
-    page++;
-  }
 
   return err;
 }
@@ -923,7 +587,7 @@ allocator_alloc (armeabi_allocator_t handle,
   else
     {
      /* No free block big enough - extend dynamic area.  */
-      dynamicarea_block *da = &allocator->da;
+      dynamicarea *da = &allocator->da;
       int extra_pages_required;
       void *block_addr;
 
@@ -985,19 +649,19 @@ allocator_alloc (armeabi_allocator_t handle,
   if ((flags & ALLOCATOR_ALLOC_FLAGS_MASK) == ALLOCATOR_ALLOC_FLAG_ALLOC_ONLY)
     return NULL;
 
-  err = allocator_claim_pages(&allocator->da,
-			      *block_ret,
-			      required_page_count);
+  err = dynamicarea_claim_pages(&allocator->da,
+				*block_ret,
+				required_page_count);
   if (err)
     return err;
 
   if ((flags & ALLOCATOR_ALLOC_FLAGS_MASK) != ALLOCATOR_ALLOC_FLAG_MAP)
     return NULL;
 
-  return allocator_map_pages(&allocator->da,
-			     *block_ret,
-			     required_page_count,
-			     flags & ALLOCATOR_ALLOC_FLAGS_ACCESS_MASK);
+  return dynamicarea_map_pages(&allocator->da,
+			       *block_ret,
+			       required_page_count,
+			       flags & ALLOCATOR_ALLOC_FLAGS_ACCESS_MASK);
 }
 
 _kernel_oserror *
@@ -1033,9 +697,9 @@ allocator_free_internal (armeabisupport_allocator *allocator,
   if ((allocator->flags & ALLOCATOR_TYPE_MASK) == ALLOCATOR_TYPE_PAGE)
     {
       _kernel_oserror *err;
-      err = unmap_release_pages(&allocator->da,
-				get_page_number(&allocator->da, block->start_addr),
-				block->page_count);
+      err = dynamicarea_unmap_release_all_pages(&allocator->da,
+						get_page_number(&allocator->da, block->start_addr),
+						block->page_count);
       if (err)
 	{
 	  DEBUG_OUTPUT_SWI_ERROR(err);
@@ -1170,19 +834,19 @@ allocator_mmap (armeabisupport_allocator *allocator,
     return NULL;
 
   eabi_PTR block_address = page_to_addr(&allocator->da, new_block->start_page);
-  err = allocator_claim_pages(&allocator->da,
-			      block_address,
-			      required_page_count);
+  err = dynamicarea_claim_pages(&allocator->da,
+				block_address,
+				required_page_count);
   if (err)
     return err;
 
   if ((flags & ALLOCATOR_ALLOC_FLAGS_MASK) != ALLOCATOR_ALLOC_FLAG_MAP)
     return NULL;
 
-  return allocator_map_pages(&allocator->da,
-			     block_address,
-			     required_page_count,
-			     flags & ALLOCATOR_ALLOC_FLAGS_ACCESS_MASK);
+  return dynamicarea_map_pages(&allocator->da,
+			       block_address,
+			       required_page_count,
+			       flags & ALLOCATOR_ALLOC_FLAGS_ACCESS_MASK);
 }
 
 _kernel_oserror *
@@ -1195,7 +859,7 @@ allocator_munmap_block(armeabisupport_allocator *allocator,
       return NULL;
     }
 
-  unmap_release_pages(&allocator->da, block->start_page, block->end_page - block->start_page);
+  dynamicarea_unmap_release_all_pages(&allocator->da, block->start_page, block->end_page - block->start_page);
   linklist_remove(&allocator->block_list, &block->link);
   rma_free(block);
 
@@ -1245,21 +909,21 @@ allocator_munmap (armeabisupport_allocator *allocator,
 	      }
 
 	      /* The following is just an inline version of what allocator_munmap_block() does.  */
-	      unmap_release_pages(&allocator->da, page, page_count);
+	      dynamicarea_unmap_release_all_pages(&allocator->da, page, page_count);
 	      linklist_remove(&allocator->block_list, &current->link);
 	      rma_free(current);
 	    }
 	  else if (page == current->start_page)
 	    {
 	      /* Freeing start of a block.  */
-	      unmap_release_pages(&allocator->da, page, page_count);
+	      dynamicarea_unmap_release_all_pages(&allocator->da, page, page_count);
 	      current->start_page += page_count;
 	    }
 	  else if (page + page_count == current->end_page)
 	    {
 	      /* Freeing the end of a block.  */
 	      current->end_page -= page_count;
-	      unmap_release_pages(&allocator->da, current->end_page, page_count);
+	      dynamicarea_unmap_release_all_pages(&allocator->da, current->end_page, page_count);
 	    }
 	  else
 	    {
@@ -1282,9 +946,9 @@ allocator_munmap (armeabisupport_allocator *allocator,
 	      else
 		linklist_add_to_end(&allocator->block_list, &new_block->link);
 	      /* Release the pages from the hole.  */
-	      unmap_release_pages(&allocator->da,
-				  page,
-				  page_count);
+	      dynamicarea_unmap_release_all_pages(&allocator->da,
+						  page,
+						  page_count);
 	      current->end_page = page;
 	    }
 	  break;
@@ -1337,9 +1001,9 @@ allocator_move_mmap_block(armeabisupport_allocator *allocator,
 	 0,
 	 pages_to_bytes(page_diff));
   /* Delete the old block.  */
-  unmap_release_pages(&allocator->da,
-		      block->start_page,
-		      block->end_page - block->start_page);
+  dynamicarea_unmap_release_all_pages(&allocator->da,
+				      block->start_page,
+				      block->end_page - block->start_page);
   linklist_remove(&allocator->block_list, &block->link);
   rma_free(block);
 
@@ -1365,9 +1029,9 @@ allocator_mremap(armeabisupport_allocator *allocator,
       block->end_page += page_diff;		/* Note -ve page_diff.  */
       *allocator_ret = allocator;
       *block_ret = block;
-      return unmap_release_pages(&allocator->da,
-				 block->end_page,
-				 -page_diff);	/* Note -ve page_diff, this makes it +ve.  */
+      return dynamicarea_unmap_release_all_pages(&allocator->da,
+						 block->end_page,
+						 -page_diff);	/* Note -ve page_diff, this makes it +ve.  */
     }
 
   *block_ret = NULL;
@@ -1381,13 +1045,13 @@ allocator_mremap(armeabisupport_allocator *allocator,
 	  LOG("allocator_mremap: Extend block into gap before next block");
 
 	  /* Expand into gap. Claim and Map in the new pages.  */
-	  if ((err = allocator_claim_pages(&allocator->da,
-					   page_to_addr(&allocator->da, block->end_page),
-					   page_diff)) == NULL)
-	    err = allocator_map_pages(&allocator->da,
-				      page_to_addr(&allocator->da, block->end_page),
-				      page_diff,
-				      0);
+	  if ((err = dynamicarea_claim_pages(&allocator->da,
+					     page_to_addr(&allocator->da, block->end_page),
+					     page_diff)) == NULL)
+	    err = dynamicarea_map_pages(&allocator->da,
+					page_to_addr(&allocator->da, block->end_page),
+					page_diff,
+					0);
 	  if (err)
 	    return err;
 
@@ -1445,13 +1109,13 @@ allocator_mremap(armeabisupport_allocator *allocator,
 	  LOG("allocator_mremap: End of DA, extend into unused space");
 
 	  /* We can extend into the end of the DA. Claim and Map in the new pages.  */
-	  if ((err = allocator_claim_pages(&allocator->da,
-					   page_to_addr(&allocator->da, block->end_page),
-					   page_diff)) == NULL)
-	    err = allocator_map_pages(&allocator->da,
-				      page_to_addr(&allocator->da, block->end_page),
-				      page_diff,
-				      0);
+	  if ((err = dynamicarea_claim_pages(&allocator->da,
+					     page_to_addr(&allocator->da, block->end_page),
+					     page_diff)) == NULL)
+	    err = dynamicarea_map_pages(&allocator->da,
+					page_to_addr(&allocator->da, block->end_page),
+					page_diff,
+					0);
 	  if (err)
 	    return err;
 
@@ -1496,9 +1160,9 @@ allocator_mmap_cleanup_app(armeabisupport_allocator *allocator,
       if (block->owner == app)
 	{
 	  LOG("allocator_mmap_cleanup_app:   removed");
-	  unmap_release_pages(&allocator->da,
-			      block->start_page,
-			      block->end_page - block->start_page);
+	  dynamicarea_unmap_release_all_pages(&allocator->da,
+					      block->start_page,
+					      block->end_page - block->start_page);
 	  linklist_remove(&allocator->block_list, &block->link);
 	  rma_free(block);
 	}
@@ -1777,7 +1441,7 @@ static void _vt_heap_destroy(armeabisupport_allocator *allocator)
 
 static _kernel_oserror *_vt_heap_alloc(armeabisupport_allocator *allocator, size_t size, unsigned flags, eabi_PTR *ret)
 {
-  return heap_alloc(allocator, size, ret);
+  return dynamicarea_heap_alloc(&allocator->da, size, ret);
 }
 
 static _kernel_oserror *_vt_heap_free(armeabisupport_allocator *allocator, eabi_PTR block, size_t size)
@@ -1806,9 +1470,9 @@ static void _vt_paged_destroy(armeabisupport_allocator *allocator)
     }
 
   /* Make sure all memory pages are unmapped and released.  */
-  unmap_release_pages (&allocator->da,
-		       0,
-		       allocator->da.size);
+  dynamicarea_unmap_release_all_pages (&allocator->da,
+				       0,
+				       allocator->da.size);
 }
 
 static _kernel_oserror *_vt_paged_alloc(armeabisupport_allocator *alloctor, size_t num_pages, unsigned flags, eabi_PTR *ret)

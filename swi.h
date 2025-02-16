@@ -2,7 +2,7 @@
  *
  * Inline assembler versions and declarations of some common SWIs.
  *
- * Copyright 2019 GCCSDK Developers
+ * Copyright 2019-2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -39,11 +39,6 @@
 #define ARMEABISUPPORT_ABORTOP_DEREGISTER	1
 #define ARMEABISUPPORT_ABORTOP_INSTALL		2
 #define ARMEABISUPPORT_ABORTOP_REMOVE		3
-
-_kernel_oserror *dynamic_area_create (const char *name,
-				      int max_size,
-				      unsigned type,
-				      dynamicarea_block *ret);
 
 #ifndef USE_INLINE_SWIS
 _kernel_oserror *rma_claim (int __size, void **block_ret);

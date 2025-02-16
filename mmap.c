@@ -543,13 +543,13 @@ armeabi_madvise(eabi_PTR addr, size_t size, int advice)
   uint32_t num_pages = bytes_to_pages(size);
   if (advice == MADV_DONTNEED || advice == MADV_FREE)
     {
-      if ((err = allocator_unmap_pages(&allocator->da, addr, num_pages)) == NULL)
-        err = allocator_release_pages(&allocator->da, addr, num_pages);
+      if ((err = dynamicarea_unmap_pages(&allocator->da, addr, num_pages)) == NULL)
+        err = dynamicarea_release_pages(&allocator->da, addr, num_pages);
     }
   else if (advice == MADV_WILLNEED || advice == MADV_NORMAL)
     {
-      if ((err = allocator_claim_pages(&allocator->da, addr, num_pages)) == NULL)
-	err = allocator_map_pages(&allocator->da, addr, num_pages, 0);
+      if ((err = dynamicarea_claim_pages(&allocator->da, addr, num_pages)) == NULL)
+	err = dynamicarea_map_pages(&allocator->da, addr, num_pages, 0);
     }
   else
     err = armeabisupport_EINVAL;

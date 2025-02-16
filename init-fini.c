@@ -123,7 +123,7 @@ _kernel_oserror *module_initialise (const char *tail, int podule_base, void *pw)
 		     OS_PERMISSION_FLAG_USER_READ | OS_PERMISSION_FLAG_USER_WRITE | OS_PERMISSION_FLAG_USER_EXEC,
 		     &global.os_memory_prot_none);
 
-  dynamicarea_block test_da;
+  dynamicarea test_da;
   dynamic_area_create("abort-test", 4096, ALLOCATOR_TYPE_PAGE, &test_da);
 
   _kernel_swi_regs regs;

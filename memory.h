@@ -9,14 +9,11 @@
 
 #include <kernel.h>
 #include "link_list.h"
+#include "dynamicarea.h"
 #include "swis.h"
 #include "types.h"
 
 #define DEBUG_ALLOCATOR 0
-
-#define PAGE_SIZE 0x1000
-#define PAGE_SHIFT 12
-#define PAGE_SIZE_MASK 0xfff
 
 #define ALLOCATOR_TYPE_MASK		0xF
 #define ALLOCATOR_TYPE_MMAP		0
@@ -82,7 +79,7 @@ typedef struct _armeabisupport_allocator
 {
   link_hdr link;
   unsigned validate;
-  dynamicarea_block da;
+  dynamicarea da;
   unsigned flags;
   allocator_type type;
   const virtual_function_table *vt;
@@ -125,26 +122,6 @@ _kernel_oserror *
 allocator_free(armeabi_allocator_t handle,
 	       eabi_PTR block);
 
-_kernel_oserror *
-allocator_claim_pages(dynamicarea_block *,
-		      eabi_PTR first_page_address,
-		      unsigned num_pages);
-
-_kernel_oserror *
-allocator_release_pages(dynamicarea_block *,
-		        eabi_PTR first_page_address,
-		        unsigned num_pages);
-
-_kernel_oserror *
-allocator_map_pages (dynamicarea_block *,
-		     eabi_PTR address,
-		     unsigned int num_pages,
-		     unsigned flags);
-
-_kernel_oserror *
-allocator_unmap_pages (dynamicarea_block *,
-		       eabi_PTR address,
-		       unsigned num_pages);
 
 _kernel_oserror *
 allocator_mmap (armeabisupport_allocator *allocator,
@@ -182,53 +159,6 @@ void
 allocator_mmap_cleanup_app(armeabisupport_allocator *allocator,
 			   app_object *app);
 
-static inline size_t
-page_align_size (size_t v)
-{
-  return (v + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1);
-}
-
-static inline eabi_PTR
-page_align_addr (eabi_PTR v)
-{
-  return (eabi_PTR) (((unsigned int) v + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1));
-}
-
-static inline int
-bytes_to_pages (size_t v)
-{
-  return (int)page_align_size (v) >> PAGE_SHIFT;
-}
-
-static inline size_t
-pages_to_bytes (int v)
-{
-  return (size_t)(v << PAGE_SHIFT);
-}
-
-/* Return TRUE if the number of bytes is a multiple of the page size.  */
-static inline int is_whole_pages(size_t bytes)
-{
-  return (bytes & (PAGE_SIZE - 1)) == 0;
-}
-
-/* Return TRUE if the address is page aligned.  */
-static inline int is_page_aligned(eabi_PTR addr)
-{
-  return ((unsigned)addr & (PAGE_SIZE - 1)) == 0;
-}
-
-static inline eabi_PTR page_to_addr(dynamicarea_block *da, uint32_t page)
-{
-  return da->base + pages_to_bytes(page);
-}
-
-static inline int
-get_page_number(dynamicarea_block *da,
-		eabi_PTR address)
-{
-  return (address - (eabi_PTR)da->base) >> PAGE_SHIFT;
-}
 
 extern void allocator_dump_all(link_list *list);
 

@@ -62,18 +62,6 @@ typedef struct pmp_page_info_entry
   unsigned flags;
 } pmp_page_info_entry;
 
-typedef struct dynamicarea_block
-{
-  unsigned int number;
-  eabi_PTR base;
-  /* Size of DA in pages.  */
-  size_t size;
-  /* The maximum number of pages available for allocation.
-   * base + (max_size - 1) gives the last addressable page. */
-  size_t max_size;
-
-} dynamicarea_block;
-
 typedef struct _stack_abort_data_object
 {
   link_list *stack_list;

@@ -2,6 +2,8 @@
 
 bin_PROGRAMS=ARMEABISupport
 ARMEABISupport_SOURCES= \
+	dynamicarea.c \
+	dynamicarea.h \
 	link_list.c \
 	link_list.h \
 	memory.c \
@@ -9,7 +11,6 @@ ARMEABISupport_SOURCES= \
 	swihandler.c \
 	init-fini.c \
 	main.c \
-	swi.c \
 	swi.h \
 	swi-asm.s \
 	command.c \

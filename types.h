@@ -77,6 +77,7 @@ typedef struct _app_object
   link_list stack_list;
   stack_abort_data_object stack_abort_data;
   array_t fd_table;
+  array_t mmap_table;		/* struct app_mmap_mapping */
   char name[APP_NAME_MAX_LEN];
 } app_object;
 LINKLIST_ACCESS_FUNCTIONS (app_object)
@@ -84,7 +85,7 @@ LINKLIST_ACCESS_FUNCTIONS (app_object)
 typedef struct armeabisupport_globals
 {
   armeabi_allocator_t stack_allocator;
-  link_list mmap_allocator_pool;
+  array_t mmap_allocator_pool;	/* struct mmap_allocator */
   link_list app_list;
   link_list allocator_list;
   bool pre_filter_installed;

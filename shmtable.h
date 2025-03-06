@@ -8,7 +8,7 @@
 #define SHMTABLE_H
 
 #include "table_entry_base.h"
-#include "memory.h"
+#include "mmap.h"
 #include "types.h"
 #include <swi.h>
 
@@ -25,8 +25,8 @@ typedef struct _systemshmtable_entry
 {
   table_entry_base table_base;
 
-  armeabisupport_allocator *allocator;
-  mmap_block *block;
+  mmap_allocator_t allocator_idx;
+  mmap_mapping_t mapping_idx;
 
   bool linked;
 
@@ -36,8 +36,8 @@ typedef struct _systemshmtable_entry
 
 _kernel_oserror *systemshmtable_open_shm(const char *name, int flags, int mode, int *);
 _kernel_oserror *systemshmtable_deref_shm(int systemtable_idx);
-_kernel_oserror *opentable_unmap_shm(armeabisupport_allocator *allocator,
-				     mmap_block *block);
+_kernel_oserror *opentable_unmap_shm(mmap_allocator *allocator,
+				     mmap_mapping *block);
 void openshmtable_print(void);
 void systemshmtable_print(void);
 

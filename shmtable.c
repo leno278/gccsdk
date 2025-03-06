@@ -1,6 +1,6 @@
 /* shmtable.c
  *
- * Copyright 2024 GCCSDK Developers
+ * Copyright 2024,2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -9,6 +9,7 @@
 #include "opentable.h"
 #include "fdtable.h"
 #include "memory.h"
+#include "main.h"
 #include "types.h"
 #include <string.h>
 #include <stdlib.h>
@@ -79,8 +80,8 @@ _kernel_oserror *systemshmtable_open_shm(const char *name, int oflag, int mode, 
 	  systemshmtable_entry *entry = (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
 										    *idx_ret);
 
-	  entry->allocator = NULL;
-	  entry->block = NULL;
+	  entry->allocator_idx = ARRAY_INVALID_INDEX;
+	  entry->mapping_idx = ARRAY_INVALID_INDEX;
 	  entry->table_base.ref_count = 1;
 	  entry->linked = true;
 	  entry->name = strdup(name);
@@ -100,25 +101,29 @@ _kernel_oserror *systemshmtable_deref_shm(int systemtable_idx)
 									    systemtable_idx);
   if (entry && array_entry_is_in_use(&entry->table_base.array_base))
     {
+      mmap_allocator *allocator = mmap_allocator_get_entry(entry->allocator_idx);
+      mmap_mapping *block = mmap_mapping_get_entry(allocator, entry->mapping_idx);
+
       entry->table_base.ref_count--;
       LOG("%s:   Ref count now %d for system table entry %s (%X)", __func__,
 	  entry->table_base.ref_count,
 	  entry->name,
-	  entry->block ? page_to_addr(&entry->allocator->da, entry->block->start_page) : NULL);
+	  block ? page_to_addr(&allocator->da, block->start_page) : NULL);
       if (entry->table_base.ref_count == 0)
 	{
 	  LOG("%s:   Destroying system table entry %s", __func__, entry->name);
-	  if (entry->allocator && entry->block)
+	  if (allocator && block)
 	    {
-	      allocator_munmap_block(entry->allocator, entry->block);
-	      entry->allocator = NULL;
-	      entry->block = NULL;
+	      mmap_allocator_munmap_block(allocator, block);
+	      entry->allocator_idx = ARRAY_INVALID_INDEX;
+	      entry->mapping_idx = ARRAY_INVALID_INDEX;
 	    }
 	  if (entry->name)
 	    {
 	      free((void *)entry->name);
 	      entry->name = NULL;
 	    }
+	  /* Sytem table entry now free to re-use.  */
 	  array_entry_mark_unused(&entry->table_base.array_base);
 	  return NULL;
 	}
@@ -156,8 +161,8 @@ _kernel_oserror *opentable_add_shm(int systemtable_idx,
   return err;
 }
 
-_kernel_oserror *opentable_unmap_shm(armeabisupport_allocator *allocator,
-				     mmap_block *block)
+_kernel_oserror *opentable_unmap_shm(mmap_allocator *allocator,
+				     mmap_mapping *block)
 {
   TRACE("%s: opentable_idx=%d", __func__, block->opentable_idx);
 
@@ -174,8 +179,8 @@ _kernel_oserror *opentable_unmap_shm(armeabisupport_allocator *allocator,
        st_entry,
        st_entry->name,
        block->opentable_idx,
-       page_to_addr(&st_entry->allocator->da, st_entry->block->start_page),
-       pages_to_bytes(st_entry->block->end_page - st_entry->block->start_page),
+       page_to_addr(&allocator->da, block->start_page),
+       pages_to_bytes(block->end_page - block->start_page),
        ot_entry->ref_count,
        st_entry->table_base.ref_count);
 #endif
@@ -191,12 +196,13 @@ void openshmtable_print(void)
   array_t *table = &global.open_table;
   opentable_entry *ot_entry = (opentable_entry *)table->entries;
 
-  printf("%-4s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF");
+  printf("SHM Open Table:\n");
+  printf("  %-4s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF");
   for (int i = 0; i < table->num_entries; i++)
     {
       if (ot_entry[i].type == opentable_type_SHM && array_entry_is_in_use(&ot_entry[i].array_base))
 	{
-	  printf("%-4d %-12d %-12d %s\n",
+	  printf("  %-4d %-12d %-12d %s\n",
 		 i,
 		 ot_entry[i].systemtable_idx,
 		 ot_entry[i].ref_count,
@@ -210,12 +216,18 @@ void systemshmtable_print(void)
   array_t *table = &global.system_table[fd_type_SHM];
   systemshmtable_entry *entry = (systemshmtable_entry *)table->entries;
 
-  printf("%-4s %-12s %s\n", "IDX", "REF","NAME");
+  printf("SHM System Table:\n");
+  printf("  %-4s %-4s %-6s %-7s %s\n", "IDX", "REF", "ALLOC", "MAPPING", "NAME");
   for (int i = 0; i < table->num_entries; i++)
     {
       if (entry[i].table_base.array_base.in_use)
 	{
-	  printf("%-4d %-12d %s\n", i, entry[i].table_base.ref_count, entry[i].name);
+	  printf("  %-4d %-4d %-6d %-7d %s\n",
+		 i,
+		 entry[i].table_base.ref_count,
+		 entry[i].allocator_idx,
+		 entry[i].mapping_idx,
+		 entry[i].name);
 	}
     }
 }
@@ -226,6 +238,8 @@ static void opentable_log_shm_entry(opentable_entry *ot_entry)
   systemshmtable_entry *system_entry =
 	    (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
 							ot_entry->systemtable_idx);
+  mmap_allocator *allocator = mmap_allocator_get_entry(system_entry->allocator_idx);
+  mmap_mapping *block = mmap_mapping_get_entry(allocator, system_entry->mapping_idx);
   reporter_printf("%4d %4s %4d %6d",
 		  index,
 		  "SHM",
@@ -233,7 +247,7 @@ static void opentable_log_shm_entry(opentable_entry *ot_entry)
 		  ot_entry->systemtable_idx);
   reporter_printf("                   SYSTEM: REF:%3d ADDR:%10X NAME:%s",
 		  system_entry->table_base.ref_count,
-		  page_to_addr(&system_entry->allocator->da, system_entry->block->start_page),
+		  page_to_addr(&allocator->da, block->start_page),
 		  system_entry->name);
 }
 
@@ -243,12 +257,12 @@ void openshmtable_log(void)
   array_t *table = &global.open_table;
   opentable_entry *ot_entry = (opentable_entry *)table->entries;
 
-  reporter_printf("%-4s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF");
+  reporter_printf("%-4s %-12s %-12s PATH", "IDX", "SYSIDX", "REF");
   for (int i = 0; i < table->num_entries; i++)
     {
       if (ot_entry[i].type == opentable_type_SHM && array_entry_is_in_use(&ot_entry[i].array_base))
 	{
-	  reporter_printf("%-4d %-12d %-12d %s\n",
+	  reporter_printf("%-4d %-12d %-12d %s",
 		 i,
 		 ot_entry[i].systemtable_idx,
 		 ot_entry[i].ref_count,
@@ -262,16 +276,18 @@ void systemshmtable_log(void)
   array_t *table = &global.system_table[fd_type_SHM];
   systemshmtable_entry *entry = (systemshmtable_entry *)table->entries;
 
-  reporter_printf("%4s %4s %10s %10s %s\n", "IDX", "REF", "ADDR", "SIZE", "NAME");
+  reporter_printf("%4s %4s %10s %10s %s", "IDX", "REF", "ADDR", "SIZE", "NAME");
   for (int i = 0; i < table->num_entries; i++)
     {
       if (entry[i].table_base.array_base.in_use)
 	{
-	  reporter_printf("%4d %4d %10X %10X %s\n",
+	  mmap_allocator *allocator = mmap_allocator_get_entry(entry[i].allocator_idx);
+	  mmap_mapping *block = mmap_mapping_get_entry(allocator, entry[i].mapping_idx);
+	  reporter_printf("%4d %4d %10X %10X %s",
 			  i,
 			  entry[i].table_base.ref_count,
-			  page_to_addr(&entry[i].allocator->da, entry[i].block->start_page),
-			  pages_to_bytes(entry[i].block->end_page - entry[i].block->start_page),
+			  page_to_addr(&allocator->da, block->start_page),
+			  pages_to_bytes(block->end_page - block->start_page),
 			  entry[i].name);
 	}
     }

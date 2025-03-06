@@ -11,6 +11,7 @@
 #include "filetable.h"
 #include "shmtable.h"
 #include "ipctable.h"
+#include "mmap.h"
 
 typedef enum _opentable_type
 {
@@ -25,8 +26,8 @@ typedef enum _opentable_type
 typedef struct _opentable_methods
 {
   _kernel_oserror *(*deref_system)(int);
-  _kernel_oserror *(*unmap)(armeabisupport_allocator *allocator,
-			    mmap_block *block);
+  _kernel_oserror *(*unmap)(mmap_allocator *allocator,
+			    mmap_mapping *block);
   void (*log)(struct _opentable_entry *ot_entry);
 
 } opentable_methods;

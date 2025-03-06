@@ -565,7 +565,10 @@ _kernel_oserror *fdtable_open_ipc(size_t size, int fd_ret[2])
 
   systemipctable_entry *sysipc_entry = (systemipctable_entry *)array_get_entry_ptr(&global.system_table[fd_type_IPC],
 										   sysipctbl_idx);
-  eabi_PTR write_buffer = page_to_addr(&sysipc_entry->allocator->da, sysipc_entry->block->start_page);
+  mmap_allocator *allocator = mmap_allocator_get_entry(sysipc_entry->allocator_idx);
+  mmap_mapping *block = mmap_mapping_get_entry(allocator, sysipc_entry->mapping_idx);
+
+  eabi_PTR write_buffer = page_to_addr(&allocator->da, block->start_page);
   eabi_PTR read_buffer = write_buffer + size;
 
   LOG("%s:  fd1=%d, fd2=%d, write_buffer=%X, read_buffer=%X",
@@ -629,7 +632,7 @@ _kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd
 {
   _kernel_oserror *err;
   int sysshmtbl_idx = ARRAY_INVALID_INDEX;
-  int openshmtbl_idx = ARRAY_INVALID_INDEX;
+  int opentable_idx = ARRAY_INVALID_INDEX;
 
   TRACE("%s: name=%s", __func__, name);
   TRACE("%s:   oflag=%X, mode=%X", __func__, oflag, mode);
@@ -648,22 +651,21 @@ _kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd
   if (err)
     return err;
 
-  err = opentable_add_shm(sysshmtbl_idx, oflag, mode, &openshmtbl_idx);
+  err = opentable_add_shm(sysshmtbl_idx, oflag, mode, &opentable_idx);
   if (err)
     {
       array_entry_mark_unused(array_get_entry_ptr(&global.system_table[fd_type_SHM], sysshmtbl_idx));
       return err;
     }
 
-  LOG("%s:     openshmtable index=%d", __func__, openshmtbl_idx);
 
 #if ENABLE_LOGGING
-  LOG("%s: BEFORE ALLOC",__func__);
-  fdtable_log(app);
+  opentable_entry *entry = opentable_get_entry(opentable_idx);
+  LOG("%s: ref count now %d for open table index %d", __func__, entry->ref_count, opentable_idx);
 #endif
 
   if ((err = fdtable_alloc_entry(app,
-				 openshmtbl_idx,
+				 opentable_idx,
 				 /*close_on_exec=*/false,
 				 fd_ret)) == NULL)
     {
@@ -681,8 +683,8 @@ _kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd
 
   if (sysshmtbl_idx != ARRAY_INVALID_INDEX)
     array_entry_mark_unused(array_get_entry_ptr(&global.system_table[fd_type_SHM], sysshmtbl_idx));
-  if (openshmtbl_idx != ARRAY_INVALID_INDEX)
-    array_entry_mark_unused(array_get_entry_ptr(&global.open_table, openshmtbl_idx));
+  if (opentable_idx != ARRAY_INVALID_INDEX)
+    array_entry_mark_unused(array_get_entry_ptr(&global.open_table, opentable_idx));
 
   if (err)
     {
@@ -793,7 +795,8 @@ void fdtable_print(app_object *app)
   array_t *table = &app->fd_table;
   fdtable_entry *fd = (fdtable_entry *)table->entries;
 
-  printf("%-8s %s\n", "FD", "TYPE");
+  printf("FD Table:\n");
+  printf("  %-8s %s\n", "FD", "TYPE");
   for (int i = 0; i < table->num_entries; i++)
     if (array_entry_is_in_use(&fd[i].base))
       {
@@ -804,12 +807,12 @@ void fdtable_print(app_object *app)
 	    systemfiletable_entry *system_entry =
 			(systemfiletable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHARED_FILE],
 								   open_entry->systemtable_idx);
-	    printf("%-8d %-10s     OPEN IDX:%-3d REF:%d\n",
+	    printf("  %-8d %-10s     OPEN IDX:%-3d REF:%d\n",
 		   i + FDTABLE_BASE_FD,
 		   "FILE",
 		   fd[i].opentable_idx,
 		   open_entry->ref_count);
-	    printf("                     SYSTEM IDX:%-3d REF:%-3d PATH:%s\n",
+	    printf("                       SYSTEM IDX:%-3d REF:%-3d PATH:%s\n",
 		   open_entry->systemtable_idx,
 		   system_entry->table_base.ref_count,
 		   system_entry->filename);
@@ -819,12 +822,12 @@ void fdtable_print(app_object *app)
 	    systemshmtable_entry *system_entry =
 			(systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
 								   open_entry->systemtable_idx);
-	    printf("%-8d %-10s     OPEN IDX:%-3d REF:%d\n",
+	    printf("  %-8d %-10s     OPEN IDX:%-3d REF:%d\n",
 		   i + FDTABLE_BASE_FD,
 		   "SHM",
 		   fd[i].opentable_idx,
 		   open_entry->ref_count);
-	    printf("                     SYSTEM IDX:%-3d REF:%-3d NAME:%s\n",
+	    printf("                       SYSTEM IDX:%-3d REF:%-3d NAME:%s\n",
 		   open_entry->systemtable_idx,
 		   system_entry->table_base.ref_count,
 		   system_entry->name);
@@ -834,24 +837,24 @@ void fdtable_print(app_object *app)
 	    systemipctable_entry *system_entry =
 			(systemipctable_entry *)array_get_entry_ptr(&global.system_table[fd_type_IPC],
 								   open_entry->systemtable_idx);
-	    printf("%-8d %-10s WB:%10X RB:%10X WP:%10d RP:%10d\n",
+	    printf("  %-8d %-10s WB:%10X RB:%10X WP:%10d RP:%10d\n",
 		   i + FDTABLE_BASE_FD,
 		   "IPC",
 		   (unsigned)open_entry->ipc.write_buffer,
 		   (unsigned)open_entry->ipc.read_buffer,
 		   open_entry->ipc.write_pos,
 		   open_entry->ipc.read_pos);
-	    printf("                  OPEN IDX:%-3d REF:%d\n",
+	    printf("                    OPEN IDX:%-3d REF:%d\n",
 		   fd[i].opentable_idx,
 		   open_entry->ref_count);
-	    printf("                        SYSTEM IDX:%-3d REF:%d\n",
+	    printf("                          SYSTEM IDX:%-3d REF:%d\n",
 		   open_entry->systemtable_idx,
 		   system_entry->table_base.ref_count);
 	    break;
 	  }
 	  case opentable_type_INVALID:
 	  default:
-	    printf("%-8d %s\n",
+	    printf("  %-8d %s\n",
 		   i + FDTABLE_BASE_FD,
 		   "INVALID");
 	    break;
@@ -861,6 +864,8 @@ void fdtable_print(app_object *app)
 
 void fdtable_copy(app_object *dst_app, app_object *src_app)
 {
+  TRACE("%s", __func__);
+
   array_copy(&dst_app->fd_table, &src_app->fd_table);
 
   array_t *array = &dst_app->fd_table;
@@ -871,6 +876,7 @@ void fdtable_copy(app_object *dst_app, app_object *src_app)
       {
 	opentable_entry *open_table = opentable_get_entry(fd[i].opentable_idx);
 	open_table->ref_count++;
+	LOG("%s: Ref count now %d for open table index %d", __func__, open_table->ref_count, fd[i].opentable_idx);
       }
 }
 
@@ -903,7 +909,7 @@ void fdtable_log(app_object *app)
   array_t *table = &app->fd_table;
   fdtable_entry *fd = (fdtable_entry *)table->entries;
 
-  reporter_printf("%-8s %s", "FD", "TYPE");
+  LOG("%-8s %s", "FD", "TYPE");
 
   for (int i = 0; i < table->num_entries; i++)
     if (array_entry_is_in_use(&fd[i].base))
@@ -915,58 +921,60 @@ void fdtable_log(app_object *app)
 	    systemfiletable_entry *system_entry =
 			(systemfiletable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHARED_FILE],
 								   open_entry->systemtable_idx);
-	    reporter_printf("%-8d %-10s  OPEN IDX:%-3d REF:%d",
-			    i + FDTABLE_BASE_FD,
-			    "FILE",
-			    fd[i].opentable_idx,
-			    open_entry->ref_count);
-	    reporter_printf("                   SYSTEM IDX:%-3d REF:%-3d HANDLE:%d PATH:%s",
-			    open_entry->systemtable_idx,
-			    system_entry->table_base.ref_count,
-			    system_entry->file_handle,
-			    system_entry->filename);
+	    LOG("%-8d %-10s  OPEN IDX:%-3d REF:%d",
+		i + FDTABLE_BASE_FD,
+		"FILE",
+		fd[i].opentable_idx,
+		open_entry->ref_count);
+	    LOG("                   SYSTEM IDX:%-3d REF:%-3d HANDLE:%d PATH:%s",
+		open_entry->systemtable_idx,
+		system_entry->table_base.ref_count,
+		system_entry->file_handle,
+		system_entry->filename);
 	    break;
 	  }
 	  case opentable_type_SHM: {
 	    systemshmtable_entry *system_entry =
 			(systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
 								   open_entry->systemtable_idx);
-	    reporter_printf("%-8d %-10s  OPEN IDX:%-3d REF:%d",
-			    i + FDTABLE_BASE_FD,
-			    "SHM",
-			    fd[i].opentable_idx,
-			    open_entry->ref_count);
-	    reporter_printf("                   SYSTEM IDX:%-3d REF:%-3d ADDR:%10X NAME:%s",
-			    open_entry->systemtable_idx,
-			    system_entry->table_base.ref_count,
-			    page_to_addr(&system_entry->allocator->base, system_entry->block->start_page),
-			    system_entry->name);
+	    LOG("%-8d %-10s  OPEN IDX:%-3d REF:%d",
+		i + FDTABLE_BASE_FD,
+		"SHM",
+		fd[i].opentable_idx,
+		open_entry->ref_count);
+	    mmap_allocator *allocator = mmap_allocator_get_entry(system_entry->allocator_idx);
+	    mmap_mapping *block = mmap_mapping_get_entry(allocator, system_entry->mapping_idx);
+	    LOG("                   SYSTEM IDX:%-3d REF:%-3d ADDR:%10X NAME:%s",
+		open_entry->systemtable_idx,
+		system_entry->table_base.ref_count,
+		allocator ? page_to_addr(&allocator->da, block->start_page) : NULL,
+		system_entry->name);
 	    break;
 	  }
 	  case opentable_type_IPC: {
 	    systemipctable_entry *system_entry =
 			(systemipctable_entry *)array_get_entry_ptr(&global.system_table[fd_type_IPC],
 								   open_entry->systemtable_idx);
-	    reporter_printf("%-8d %-10s  OPEN IDX:%-3d REF:%d",
-			    i + FDTABLE_BASE_FD,
-			    "IPC",
-			    fd[i].opentable_idx,
-			    open_entry->ref_count);
-	    reporter_printf("                   SYSTEM IDX:%-3d REF:%d",
-			    open_entry->systemtable_idx,
-			    system_entry->table_base.ref_count);
-	    reporter_printf("                           WB:%10X RB:%10X WP:%10d RP:%10d",
-			    (unsigned)open_entry->ipc.write_buffer,
-			    (unsigned)open_entry->ipc.read_buffer,
-			    open_entry->ipc.write_pos,
-			    open_entry->ipc.read_pos);
+	    LOG("%-8d %-10s  OPEN IDX:%-3d REF:%d",
+		i + FDTABLE_BASE_FD,
+		"IPC",
+		fd[i].opentable_idx,
+		open_entry->ref_count);
+	    LOG("                   SYSTEM IDX:%-3d REF:%d",
+		open_entry->systemtable_idx,
+		system_entry->table_base.ref_count);
+	    LOG("                           WB:%10X RB:%10X WP:%10d RP:%10d",
+		(unsigned)open_entry->ipc.write_buffer,
+		(unsigned)open_entry->ipc.read_buffer,
+		open_entry->ipc.write_pos,
+		open_entry->ipc.read_pos);
 	    break;
 	  }
 	  case opentable_type_INVALID:
 	  default:
-	    reporter_printf("%-8d %s",
-			    i + FDTABLE_BASE_FD,
-			    "INVALID");
+	    LOG("%-8d %s",
+		i + FDTABLE_BASE_FD,
+		"INVALID");
 	    break;
 	}
       }

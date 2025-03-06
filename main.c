@@ -59,7 +59,7 @@ app_new(app_object **app_ret, const char *name)
     }
 
   abort_register_internal(app, get_stack_abort_handler(), (unsigned)&app->stack_abort_data);
-  abort_register_internal(app, get_mmap_abort_handler(), (unsigned)&global.mmap_allocator_pool);
+//  abort_register_internal(app, get_mmap_abort_handler(), (unsigned)&global.mmap_allocator_pool);
 
   linklist_add_to_end(&global.app_list, &app->link);
 
@@ -80,6 +80,8 @@ app_new(app_object **app_ret, const char *name)
     }
   else
     array_ctor(&app->fd_table, sizeof(fdtable_entry));
+
+  array_ctor(&app->mmap_table, sizeof(app_mmap_mapping));
 
   *app_ret = app;
 
@@ -116,6 +118,8 @@ app_find(app_object **app_ret)
 _kernel_oserror *
 armeabi_cleanup(void)
 {
+  TRACE("%s", __func__);
+
   _kernel_oserror *err;
   app_object *app;
 
@@ -189,6 +193,9 @@ void log_printf(const char *format, ...)
   time_t t;
   struct tm *tmp;
 
+  app_object *app;
+  app_find(&app);
+
   va_list ap;
   va_start (ap, format);
 
@@ -196,6 +203,11 @@ void log_printf(const char *format, ...)
   tmp = localtime(&t);
 
   *p++ = '[';
+  if (app)
+    {
+      p += snprintf(p, sizeof(buffer) - strlen(buffer) - 1, "%s", app->name);
+      *p++ = ':';
+    }
   p += strftime(p, sizeof(buffer) - strlen(buffer) - 1, "%d/%m  %T", tmp);
   *p++ = ']';
   *p++ = ' ';

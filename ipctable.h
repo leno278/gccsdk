@@ -9,6 +9,7 @@
 
 #include "table_entry_base.h"
 #include "memory.h"
+#include "mmap.h"
 #include "types.h"
 
 typedef struct _openipctable
@@ -35,15 +36,15 @@ typedef struct _systemipctable_entry
 {
   table_entry_base table_base;
 
-  armeabisupport_allocator *allocator;
-  mmap_block *block;
+  mmap_allocator_t allocator_idx;
+  mmap_mapping_t mapping_idx;
 
 } systemipctable_entry;
 
 _kernel_oserror *systemipctable_open_ipc(size_t size, int *idx_ret);
 _kernel_oserror *systemipctable_deref_ipc(int systemtable_idx);
-_kernel_oserror *opentable_unmap_ipc(armeabisupport_allocator *allocator,
-				     mmap_block *block);
+_kernel_oserror *opentable_unmap_ipc(mmap_allocator *allocator,
+				     mmap_mapping *block);
 void openipctable_print(void);
 void systemipctable_print(void);
 

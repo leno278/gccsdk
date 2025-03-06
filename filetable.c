@@ -15,7 +15,7 @@
 #include <fcntl.h>
 #include <swi.h>
 
-#define ENABLE_TRACING 0
+#define ENABLE_TRACING 1
 #include "trace.h"
 
 #define ENABLE_LOGGING 1
@@ -414,8 +414,8 @@ _kernel_oserror *opentable_add_file(int systemtable_idx, int flags, int mode, in
   return err;
 }
 
-_kernel_oserror *opentable_unmap_file(armeabisupport_allocator *allocator,
-				      mmap_block *block)
+_kernel_oserror *opentable_unmap_file(mmap_allocator *allocator,
+				      mmap_mapping *block)
 {
   TRACE("%s: opentable_idx=%d", __func__, block->opentable_idx);
 
@@ -451,7 +451,7 @@ _kernel_oserror *opentable_unmap_file(armeabisupport_allocator *allocator,
       LOG("%s: OS Error: %s", __func__, err->errmess);
     }
 
-  /* This will only call allocator_munmap_block() when the final reference is released.  */
+  /* This will only call mmap_allocator_munmap_block() when the final reference is released.  */
   opentable_deref_entry(block->opentable_idx);
 
   /* Don't return the error, a file error shouldn't halt the process of unmapping
@@ -470,12 +470,13 @@ void openfiletable_print(void)
   array_t *table = &global.open_table;
   opentable_entry *ot_entry = (opentable_entry *)table->entries;
 
-  printf("%-4s %-12s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF", "OFFSET");
+  printf("File Open Table:\n");
+  printf("  %-4s %-12s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF", "OFFSET");
   for (int i = 0; i < table->num_entries; i++)
     {
       if (ot_entry[i].type == opentable_type_FILE && array_entry_is_in_use(&ot_entry[i].array_base))
 	{
-	  printf("%-4d %-12d %-12d %-12ld %s\n",
+	  printf("  %-4d %-12d %-12d %-12ld %s\n",
 		 i,
 		 ot_entry[i].systemtable_idx,
 		 ot_entry[i].ref_count,
@@ -490,12 +491,13 @@ void systemfiletable_print(void)
   array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
   systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
-  printf("%-4s %-12s %-12s %s\n", "Idx", "Ref", "File handle", "File");
+  printf("File System Table:\n");
+  printf("  %-4s %-12s %-12s %s\n", "Idx", "Ref", "File handle", "File");
   for (int i = 0; i < filetable->num_entries; i++)
     {
       if (entry[i].table_base.array_base.in_use)
 	{
-	  printf("%-4d %-12d %-12d %s\n", i, entry[i].table_base.ref_count, entry[i].file_handle, entry[i].filename);
+	  printf("  %-4d %-12d %-12d %s\n", i, entry[i].table_base.ref_count, entry[i].file_handle, entry[i].filename);
 	}
     }
 }
@@ -524,12 +526,12 @@ void openfiletable_log(void)
   array_t *table = &global.open_table;
   opentable_entry *ot_entry = (opentable_entry *)table->entries;
 
-  reporter_printf("%-4s %-12s %-12s %-12s PATH\n", "IDX", "SYSIDX", "REF", "OFFSET");
+  reporter_printf("%-4s %-12s %-12s %-12s PATH", "IDX", "SYSIDX", "REF", "OFFSET");
   for (int i = 0; i < table->num_entries; i++)
     {
       if (ot_entry[i].type == opentable_type_FILE && array_entry_is_in_use(&ot_entry[i].array_base))
 	{
-	  reporter_printf("%-4d %-12d %-12d %-12ld %s\n",
+	  reporter_printf("%-4d %-12d %-12d %-12ld %s",
 			  i,
 			  ot_entry[i].systemtable_idx,
 			  ot_entry[i].ref_count,
@@ -544,12 +546,12 @@ void systemfiletable_log(void)
   array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
   systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
-  reporter_printf("%-4s %-12s %-12s %s\n", "Idx", "Ref", "File handle", "File");
+  reporter_printf("%-4s %-12s %-12s %s", "Idx", "Ref", "File handle", "File");
   for (int i = 0; i < filetable->num_entries; i++)
     {
       if (entry[i].table_base.array_base.in_use)
 	{
-	  reporter_printf("%-4d %-12d %-12d %s\n", i, entry[i].table_base.ref_count, entry[i].file_handle, entry[i].filename);
+	  reporter_printf("%-4d %-12d %-12d %s", i, entry[i].table_base.ref_count, entry[i].file_handle, entry[i].filename);
 	}
     }
 }

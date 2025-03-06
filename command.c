@@ -45,9 +45,6 @@ command_info(void)
   printf("Global allocators:\n");
   allocator_dump_all(&global.allocator_list);
 
-  printf("mmaps:\n");
-  allocator_dump_all(&global.mmap_allocator_pool);
-
   printf("FILE TABLES:\n");
   openfiletable_print();
   systemfiletable_print();

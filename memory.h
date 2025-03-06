@@ -123,35 +123,6 @@ allocator_free(armeabi_allocator_t handle,
 	       eabi_PTR block);
 
 
-_kernel_oserror *
-allocator_mmap (armeabisupport_allocator *allocator,
-		const int required_page_count,
-		unsigned flags,
-		mmap_block **block_ret);
-
-/* Unmap and free memory where we already know the block.  */
-_kernel_oserror *
-allocator_munmap_block(armeabisupport_allocator *allocator,
-		       mmap_block *block);
-
-/* Unmap and free memory where we have an address and the number of pages.  */
-_kernel_oserror *
-allocator_munmap(armeabisupport_allocator *handle,
-		 eabi_PTR block, size_t num_pages);
-_kernel_oserror *
-allocator_mremap(armeabisupport_allocator *allocator,
-		 mmap_block *block,
-		 int page_diff,
-		 uint32_t flags,
-		 armeabisupport_allocator **allocator_ret,
-		 mmap_block **block_ret);
-
-_kernel_oserror *
-allocator_change_protection(armeabisupport_allocator *allocator,
-			    eabi_PTR addr,
-			    size_t num_pages,
-			    uint32_t flags);
-
 void allocator_destroy_all(link_list *list);
 
 /* Remove any mmap allocations from the given allocator for the given app.  */

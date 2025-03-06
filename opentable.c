@@ -46,8 +46,8 @@ _kernel_oserror *opentable_deref_entry(int opentable_idx)
   if (ot_entry && array_entry_is_in_use(&ot_entry->array_base))
     {
       ot_entry->ref_count--;
-      LOG("%s:   Open table index %d ref count now %d (---)",
-      		__func__, opentable_idx, ot_entry->ref_count);
+      LOG("%s: ref count now %d for open table index %d  (---)",
+	      __func__, ot_entry->ref_count, opentable_idx);
       if (ot_entry->ref_count == 0)
 	{
 	  err = ot_entry->method->deref_system(ot_entry->systemtable_idx);
@@ -57,7 +57,7 @@ _kernel_oserror *opentable_deref_entry(int opentable_idx)
     }
   else
     {
-      LOG("%s: FAIL: attempt to deref open shm entry %d that is no longer valid",
+      LOG("%s: FAIL: attempt to deref open table index %d that is no longer valid",
 	  __func__, opentable_idx);
     }
 
@@ -71,7 +71,7 @@ void opentable_log(void)
   array_t *table = &global.open_table;
   opentable_entry *ot_entry = (opentable_entry *)table->entries;
 
-  reporter_printf("%4s %4s %4s %6s\n", "IDX", "TYPE", "REF", "SYSIDX");
+  reporter_printf("%4s %4s %4s %6s", "IDX", "TYPE", "REF", "SYSIDX");
   for (int i = 0; i < table->num_entries; i++)
     {
       if (array_entry_is_in_use(&ot_entry[i].array_base))

@@ -101,6 +101,7 @@ _kernel_oserror *module_initialise (const char *tail, int podule_base, void *pw)
     array_ctor(&global.system_table[i], systemtable_entry_size[i]);
 
   array_ctor(&global.open_table, sizeof(opentable_entry));
+  array_ctor(&global.mmap_allocator_pool, sizeof(mmap_allocator));
 
   // linklist_init_list (&global.app_list);
   // global.flags.no_client_check = false;
@@ -156,9 +157,6 @@ _kernel_oserror *module_finalisation (int fatal, int podule_base, void *pw)
   // Remove the stack allocator.
   allocator_destroy_internal(global.stack_allocator);
 
-  // Remove all mmap allocations and allocators.
-  allocator_destroy_all(&global.mmap_allocator_pool);
-
   for (int i = 0; i < global.open_table.num_entries; i++)
     if (array_entry_is_in_use(&global.open_table.entries[i]))
       {
@@ -170,6 +168,7 @@ _kernel_oserror *module_finalisation (int fatal, int podule_base, void *pw)
   for (int i = 0; i < fd_type_MAX; i++)
     array_dtor(&global.system_table[i]);
 
+  array_dtor(&global.mmap_allocator_pool);
   array_dtor(&global.open_table);
 
   remove_pre_filter();

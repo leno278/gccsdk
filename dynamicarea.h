@@ -16,7 +16,7 @@
 
 typedef struct dynamicarea
 {
-  unsigned int number;
+  int number;
   eabi_PTR base;
   /* Size of DA in pages.  */
   size_t size;

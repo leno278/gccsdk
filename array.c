@@ -1,6 +1,6 @@
 /* array.c
  *
- * Copyright 2024 GCCSDK Developers
+ * Copyright 2024, 2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -101,10 +101,16 @@ void array_free(array_t *table)
 {
   TRACE("%s: table=%p", __func__, table);
 
-  if (table && table->entries)
+  if (table)
     {
-      free(table->entries);
-      table->entries = NULL;
+      if (table->entries)
+	{
+	  free(table->entries);
+	  table->entries = NULL;
+	}
+
+      table->entries = 0;
+      table->entry_size = 0;
     }
 }
 
@@ -131,6 +137,9 @@ _kernel_oserror *array_alloc_entry(array_t *this, int *idx_ret)
     }
 
   LOG("%s:   Inserting entry at index %d", __func__, i);
+
+  array_entry_base *entry = array_get_entry_ptr(this, i);
+  memset(entry, 0, this->entry_size);
 
   array_entry_mark_used(array_get_entry_ptr(this, i));
 

@@ -408,8 +408,6 @@ static _kernel_oserror *ipcop_read_fds(int fd, int *fds)
 
       LOG("%s: opentable type=%d, open table index %d", __func__, ot_received_entry->type, opentable_index);
 
-      ot_received_entry->ref_count++;
-
       if ((err = fdtable_alloc_entry(app,
 				     opentable_index,
 				     /*close_on_exec=*/false,

@@ -486,7 +486,7 @@ _kernel_oserror *opentable_unmap_file(mmap_allocator *allocator,
   _kernel_oserror *err;
   err = systemfiletable_write_bytes(ot_entry->systemtable_idx,
 				    page_to_addr(&allocator->da, block->start_page),
-				    pages_to_bytes(block->end_page - block->start_page),
+				    block->size,
 				    &offset,
 				    &bytes_not_written);
   if (err)

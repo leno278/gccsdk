@@ -690,6 +690,7 @@ armeabi_mmap_internal(app_object *app,
   block->mmap_flags = flags;
   block->prot = prot;
   block->offset = offset;
+  block->size = size;
 
   if (ot_entry && systemshm_entry)
     {

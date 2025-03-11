@@ -45,6 +45,7 @@ typedef struct _mmap_mapping
   int mmap_flags;	/* Flags as used by mmap  */
   int opentable_idx;
   uint32_t offset;
+  size_t size;
 
 } mmap_mapping;
 

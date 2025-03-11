@@ -59,7 +59,7 @@ app_new(app_object **app_ret, const char *name)
     }
 
   abort_register_internal(app, get_stack_abort_handler(), (unsigned)&app->stack_abort_data);
-//  abort_register_internal(app, get_mmap_abort_handler(), (unsigned)&global.mmap_allocator_pool);
+  abort_register_internal(app, get_mmap_abort_handler(), (unsigned)&app->mmap_table);
 
   linklist_add_to_end(&global.app_list, &app->link);
 
@@ -136,7 +136,7 @@ armeabi_cleanup(void)
       stack = next;
     }
 
-  abort_deregister(get_mmap_abort_handler(), (unsigned)&global.mmap_allocator_pool);
+  abort_deregister(get_mmap_abort_handler(), (unsigned)&app->mmap_table);
   abort_deregister(get_stack_abort_handler(), (unsigned)&app->stack_abort_data);
 
   fdtable_destroy(&app->fd_table);

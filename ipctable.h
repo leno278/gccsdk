@@ -36,11 +36,15 @@ typedef struct _systemipctable_entry
 {
   table_entry_base table_base;
 
-  mmap_allocator_t allocator_idx;
-  mmap_mapping_t mapping_idx;
+  int opentable_idx;
 
 } systemipctable_entry;
 
+_kernel_oserror *opentable_add_ipc(int systemtable_idx,
+				   eabi_PTR write_buffer,
+				   eabi_PTR read_buffer,
+				   size_t buffer_size,
+				   int *idx_ret);
 _kernel_oserror *systemipctable_open_ipc(size_t size, int *idx_ret);
 _kernel_oserror *systemipctable_deref_ipc(int systemtable_idx);
 _kernel_oserror *opentable_unmap_ipc(mmap_allocator *allocator,

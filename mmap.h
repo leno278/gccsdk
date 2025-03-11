@@ -25,6 +25,8 @@ typedef struct _app_mmap_mapping
   eabi_PTR start_addr;		/* Inclusive */
   eabi_PTR end_addr;		/* Exclusive */
 
+  int fd;
+
 } app_mmap_mapping;
 
 typedef struct _mmap_mapping
@@ -42,7 +44,6 @@ typedef struct _mmap_mapping
   int prot;		/* Memory protection flags as used by mmap  */
   int mmap_flags;	/* Flags as used by mmap  */
   int opentable_idx;
-  int fd;
   uint32_t offset;
 
 } mmap_mapping;
@@ -131,7 +132,7 @@ extern _kernel_oserror *
 armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t offset,
 	     eabi_PTR *);
 extern _kernel_oserror *
-armeabi_mmap_internal(size_t size, int prot, int flags, int opentable_idx, size_t offset,
+armeabi_mmap_internal(app_object *app, size_t size, int prot, int flags, int opentable_idx, size_t offset,
 		      app_mmap_mapping **mapping_ret);
 
 extern _kernel_oserror *

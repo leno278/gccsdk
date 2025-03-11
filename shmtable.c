@@ -17,14 +17,14 @@
 #define ENABLE_TRACING 0
 #include "trace.h"
 
-#define ENABLE_LOGGING 1
+#define ENABLE_LOGGING 0
 #include "log.h"
 
 static void opentable_log_shm_entry(opentable_entry *ot_entry);
 
 static opentable_methods shm_methods =
 {
-  systemshmtable_deref_shm,
+  systemshmtable_deref_entry,
   opentable_unmap_shm,
   opentable_log_shm_entry
 };
@@ -93,7 +93,7 @@ _kernel_oserror *systemshmtable_open_shm(const char *name, int oflag, int mode, 
   return err;
 }
 
-_kernel_oserror *systemshmtable_deref_shm(int systemtable_idx)
+_kernel_oserror *systemshmtable_deref_entry(int systemtable_idx)
 {
   TRACE("%s: systemtable_idx=%d", __func__, systemtable_idx);
 
@@ -137,28 +137,80 @@ _kernel_oserror *systemshmtable_deref_shm(int systemtable_idx)
   return armeabisupport_EINVAL;
 }
 
-_kernel_oserror *opentable_add_shm(int systemtable_idx,
-				   int flags,
-				   int mode,
-				   int *idx_ret)
+_kernel_oserror *systemshmtable_deref_shm(mmap_allocator *allocator,
+					  mmap_mapping *mapping,
+					  int systemtable_idx)
 {
   TRACE("%s: systemtable_idx=%d", __func__, systemtable_idx);
 
-  _kernel_oserror *err;
-  if ((err = opentable_add_entry(opentable_type_SHM,
-				 systemtable_idx,
-				 &shm_methods,
-				 idx_ret)) == NULL)
+  systemshmtable_entry *entry = (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
+									    systemtable_idx);
+  if (entry && array_entry_is_in_use(&entry->table_base.array_base))
     {
-      opentable_entry *entry = opentable_get_entry(*idx_ret);
-
-      entry->shm.flags = flags;
-      entry->shm.mode = mode;
+      entry->table_base.ref_count--;
+      LOG("%s:   Ref count now %d for system table entry %s (%X)", __func__,
+	  entry->table_base.ref_count,
+	  entry->name,
+	  mapping ? page_to_addr(&allocator->da, mapping->start_page) : NULL);
+      if (entry->table_base.ref_count == 0)
+	{
+	  LOG("%s:   Destroying system table entry %s", __func__, entry->name);
+	  if (allocator && mapping)
+	    {
+	      mmap_allocator_munmap_block(allocator, mapping);
+	      entry->allocator_idx = ARRAY_INVALID_INDEX;
+	      entry->mapping_idx = ARRAY_INVALID_INDEX;
+	    }
+	  if (entry->name)
+	    {
+	      free((void *)entry->name);
+	      entry->name = NULL;
+	    }
+	  /* Sytem table entry now free to re-use.  */
+	  array_entry_mark_unused(&entry->table_base.array_base);
+	  return NULL;
+	}
     }
   else
-    LOG("%s:     err=%s", __func__, err->errmess);
+    {
+      LOG("%s: FAIL: attempt to deref system shm entry %d that is no longer valid",
+	  __func__, systemtable_idx);
+    }
 
-  return err;
+  return armeabisupport_EINVAL;
+}
+
+_kernel_oserror *opentable_add_shm(const char *name,
+				   int oflag,
+				   int mode,
+				   int *idx_ret)
+{
+  TRACE("%s: name=%s", __func__, name);
+
+  int sysshmtbl_idx = ARRAY_INVALID_INDEX;
+
+  _kernel_oserror *err;
+  if ((err = systemshmtable_open_shm(name, oflag, mode, &sysshmtbl_idx)) != NULL)
+    return err;
+
+  if ((err = opentable_add_entry(opentable_type_SHM,
+				 sysshmtbl_idx,
+				 &shm_methods,
+				 idx_ret)) != NULL)
+    {
+      LOG("%s:     err=%s", __func__, err->errmess);
+
+      systemshmtable_deref_entry(sysshmtbl_idx);
+
+      return err;
+    }
+
+  opentable_entry *entry = opentable_get_entry(*idx_ret);
+
+  entry->shm.flags = oflag;
+  entry->shm.mode = mode;
+
+  return NULL;
 }
 
 _kernel_oserror *opentable_unmap_shm(mmap_allocator *allocator,
@@ -186,7 +238,7 @@ _kernel_oserror *opentable_unmap_shm(mmap_allocator *allocator,
 #endif
 
   /* This will only call allocator_munmap_block() when the final reference is released.  */
-  opentable_deref_entry(block->opentable_idx);
+  opentable_deref_mmap(allocator, block);
 
   return NULL;
 }

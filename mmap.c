@@ -515,17 +515,6 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
   if (flags & MAP_FIXED)
     return armeabisupport_EINVAL;
 
-  app_mmap_mapping *mapping;
-  _kernel_oserror *err = armeabi_mmap_internal(size, prot, flags, fd, offset, &mapping);
-  *addr_ret = mapping->start_addr;
-
-  return err;
-}
-
-_kernel_oserror *
-armeabi_mmap_internal(size_t size, int prot, int flags, int fd, size_t offset,
-		      app_mmap_mapping **mapping_ret)
-{
   _kernel_oserror *err;
   app_object *app;
   if ((err = app_find(&app)) != NULL)
@@ -545,44 +534,26 @@ armeabi_mmap_internal(size_t size, int prot, int flags, int fd, size_t offset,
 	opentable_idx = fd_entry->opentable_idx;
     }
 
-  /* fdtable_open_shm (shm_open) creates a shared memory object with no memory mapping
-   * and returns an FD to it. If we can see here that there is no mapping for the given FD
-   * then this is the first time that mmap has been called for this shared object and we
-   * make the allocation and assign it to the shared object.
-   * If there is already a mapping assigned to the shared object, then mmap has already been
-   * called for this shared object and we use that rather than creating another mapping.  */
-  opentable_entry *ot_entry = opentable_get_entry(opentable_idx);
-  systemshmtable_entry *systemshm_entry = NULL;
-  if (ot_entry && ot_entry->type == opentable_type_SHM)
+  app_mmap_mapping *mapping;
+  if ((err = armeabi_mmap_internal(app, size, prot, flags, opentable_idx, offset, &mapping)) == NULL)
     {
-      LOG("%s: shm detected, open table index %d", __func__, opentable_idx);
-      systemshm_entry = (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
-								    ot_entry->systemtable_idx);
-      if (systemshm_entry->mapping_idx != ARRAY_INVALID_INDEX)
-	{
-	  /* We've already got a memory allocation for this shared memory object.  */
-	  mmap_allocator *allocator = mmap_allocator_get_entry(systemshm_entry->allocator_idx);
-	  mmap_mapping *block = mmap_mapping_get_entry(allocator, systemshm_entry->mapping_idx);
-	  ot_entry->ref_count++;
-	  *mapping_ret = appmmap_add_mapping(app,
-					     systemshm_entry->allocator_idx,
-					     systemshm_entry->mapping_idx,
-					     page_to_addr(&allocator->da, block->start_page),
-					     page_to_addr(&allocator->da, block->end_page));
-	  LOG("%s: FD %d already connected to shm, ref count now %d for open table index %d, name=\"%s\", addr=0x%X (+++)",
-	      __func__,
-	      fd,
-	      ot_entry->ref_count,
-	      opentable_idx,
-	      systemshm_entry->name,
-	      (*mapping_ret) ? (*mapping_ret)->start_addr : NULL);
-	  return (*mapping_ret) ? NULL : armeabisupport_ENOMEM;
-	}
+      *addr_ret = mapping->start_addr;
+
+      mapping->fd = fd;
     }
 
-  uint32_t num_pages = bytes_to_pages(size);
+  return err;
+}
 
-  /* Try to allocate the memory from an existing allocator in the pool.  */
+/* Try to allocate the memory from an existing allocator in the pool.
+ * If that fails, create a new allocator.
+ */
+static _kernel_oserror *
+mmap_pool_allocate_memory(int num_pages,
+			  mmap_allocator_t *allocator_idx_ret,
+			  mmap_mapping_t *mapping_idx_ret)
+{
+  _kernel_oserror *err = NULL;
   mmap_allocator *allocator = (mmap_allocator *)global.mmap_allocator_pool.entries;
   mmap_mapping_t mmap_idx = ARRAY_INVALID_INDEX;
   mmap_allocator_t allocator_idx;
@@ -615,17 +586,107 @@ armeabi_mmap_internal(size_t size, int prot, int flags, int fd, size_t offset,
   if (err || mmap_idx == ARRAY_INVALID_INDEX)
     {
       LOG("%d:%s - err=%s",__LINE__,__func__,err->errmess);
-      *mapping_ret = NULL;
+      *allocator_idx_ret = ARRAY_INVALID_INDEX;
+      *mapping_idx_ret = ARRAY_INVALID_INDEX;
       return armeabisupport_ENOMEM;
     }
 
-  allocator = mmap_allocator_get_entry(allocator_idx);
+  *allocator_idx_ret = allocator_idx;
+  *mapping_idx_ret = mmap_idx;
+
+  return NULL;
+}
+
+_kernel_oserror *
+armeabi_mmap_internal(app_object *app,
+		      size_t size,
+		      int prot,
+		      int flags,
+		      int opentable_idx,
+		      size_t offset,
+		      app_mmap_mapping **mapping_ret)
+{
+  _kernel_oserror *err;
+
+  /* fdtable_open_shm (shm_open) creates a shared memory object with no memory mapping
+   * and returns an FD to it. If we can see here that there is no mapping for the given FD
+   * then this is the first time that mmap has been called for this shared object and we
+   * make the allocation and assign it to the shared object.
+   * If there is already a mapping assigned to the shared object, then mmap has already been
+   * called for this shared object and we use that rather than creating another mapping.  */
+  opentable_entry *ot_entry = opentable_get_entry(opentable_idx);
+  systemshmtable_entry *systemshm_entry = NULL;
+  if (ot_entry)
+    {
+      if (ot_entry->type == opentable_type_SHM)
+	{
+	  LOG("%s: shm detected, open table index %d", __func__, opentable_idx);
+	  systemshm_entry = (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
+								      ot_entry->systemtable_idx);
+	  if (systemshm_entry->mapping_idx != ARRAY_INVALID_INDEX)
+	    {
+	      /* We've already got a memory allocation for this shared memory object.  */
+	      mmap_allocator *allocator = mmap_allocator_get_entry(systemshm_entry->allocator_idx);
+	      mmap_mapping *block = mmap_mapping_get_entry(allocator, systemshm_entry->mapping_idx);
+	      ot_entry->ref_count++;
+	      *mapping_ret = appmmap_add_mapping(app,
+						 systemshm_entry->allocator_idx,
+						 systemshm_entry->mapping_idx,
+						 page_to_addr(&allocator->da, block->start_page),
+						 page_to_addr(&allocator->da, block->end_page));
+	      LOG("%s: Already connected to shm, ref count now %d for open table index %d, name=\"%s\", addr=0x%X (+++)",
+		  __func__,
+		  ot_entry->ref_count,
+		  opentable_idx,
+		  systemshm_entry->name,
+		  (*mapping_ret) ? (*mapping_ret)->start_addr : NULL);
+	      return (*mapping_ret) ? NULL : armeabisupport_ENOMEM;
+	    }
+	}
+      else if (ot_entry->type == opentable_type_FILE)
+	{
+	  LOG("%s: Looking for file mapping with offset=%d, size=%d",
+	      __func__,
+	      offset,
+	      size);
+	  app_mmap_mapping *entry = (app_mmap_mapping *)app->mmap_table.entries;
+	  for (int i = 0; i < app->mmap_table.num_entries; i++)
+	    if (array_entry_is_in_use(&entry[i].base))
+	      {
+		mmap_allocator *allocator = mmap_allocator_get_entry(entry[i].allocator_idx);
+		mmap_mapping *mapping = mmap_mapping_get_entry(allocator, entry[i].mapping_idx);
+		if (mapping->opentable_idx == opentable_idx)
+		  {
+		    LOG("%s: Found mapping for file with open table index %d - offset=%d, size=%d",
+			__func__,
+			opentable_idx,
+			mapping->offset,
+			pages_to_bytes(mapping->end_page - mapping->start_page));
+		    *mapping_ret = &entry[i];
+		    return NULL;
+		  }
+	      }
+	}
+      }
+
+  uint32_t num_pages = bytes_to_pages(size);
+
+  mmap_allocator_t allocator_idx;
+  mmap_mapping_t mmap_idx;
+
+  /* Try to allocate the memory from an existing allocator in the pool or create a new allocator.  */
+  if ((err = mmap_pool_allocate_memory(num_pages, &allocator_idx, &mmap_idx)) != NULL)
+    {
+      *mapping_ret = NULL;
+      return err;
+    }
+
+  mmap_allocator *allocator = mmap_allocator_get_entry(allocator_idx);
   mmap_mapping *block = mmap_mapping_get_entry(allocator, mmap_idx);
 
   LOG("%s: Pages %d to %d allocated from %s", __func__, block->start_page, block->end_page, allocator->name);
 
   block->opentable_idx = opentable_idx;
-  block->fd = fd;
   block->mmap_flags = flags;
   block->prot = prot;
   block->offset = offset;
@@ -635,14 +696,20 @@ armeabi_mmap_internal(size_t size, int prot, int flags, int fd, size_t offset,
       systemshm_entry->allocator_idx = allocator_idx;
       systemshm_entry->mapping_idx = mmap_idx;
       ot_entry->ref_count++;
-      LOG("%s: FD %d connecting to shm, ref count now %d for open table index %d, name=\"%s\", addr=0x%X (+++)",
+      LOG("%s: Connecting to shm, ref count now %d for open table index %d, name=\"%s\", addr=0x%X (+++)",
 	  __func__,
-	  fd,
 	  ot_entry->ref_count,
 	  opentable_idx,
 	  systemshm_entry->name,
 	  page_to_addr(&allocator->da, block->start_page));
     }
+  else if (ot_entry && ot_entry->type == opentable_type_FILE)
+    {
+      ot_entry->ref_count++;
+      reporter_printf("%s: Adding mapping for file at open table index %d, offset=%d, size=%d",
+		      __func__, opentable_idx, offset, size);
+    }
+
   LOG("%s: Allocated %d pages @ 0x%X from allocator %s",
       __func__, num_pages, page_to_addr(&allocator->da, block->start_page), allocator->name);
 
@@ -673,8 +740,8 @@ armeabi_munmap(eabi_PTR addr, size_t length)
       return NULL;
     }
 
-  LOG("%s: Found mapping %d for address 0x%X",
-      __func__, array_get_entry_idx(&app->mmap_table, &app_mmap->base), addr);
+  LOG("%s: Found mapping %d for address 0x%X, fd = %d",
+      __func__, array_get_entry_idx(&app->mmap_table, &app_mmap->base), addr, app_mmap->fd);
 
   mmap_allocator *allocator = mmap_allocator_get_entry(app_mmap->allocator_idx);
   uint32_t page = get_page_number(&allocator->da, addr);
@@ -749,13 +816,6 @@ armeabi_munmap(eabi_PTR addr, size_t length)
     allocator->da.size = 0;
   else if (mapping->end_page < allocator->da.size)
     allocator->da.size = mapping->end_page;
-
-  if (mmap_list_is_empty(&allocator->list))
-    {
-      LOG("armeabi_munmap: Allocator %s empty, destroying to reclaim dynamic area", allocator->name);
-      /* No more allocations in this allocator, remove from the pool.  */
-      mmap_allocator_destroy(allocator);
-    }
 
   return NULL;
 }
@@ -858,7 +918,7 @@ armeabi_get_info(eabi_PTR addr,
   *size = pages_to_bytes(mapping->end_page - mapping->start_page);
   *prot = mapping->prot;
   *flags = mapping->mmap_flags;
-  *fd = mapping->fd;
+  *fd = app_mapping->fd;
   *offset = mapping->offset;
 
   LOG("armeabi_get_info: addr=0x%X, mmap_addr=0x%X size=0x%X, prot=0x%X flags=0x%X, fd=%d, offset=%d",
@@ -1279,11 +1339,15 @@ mmap_allocator_move_block(app_mmap_mapping *app_mmap,
 			  app_mmap_mapping **app_mmap_ret)
 {
   _kernel_oserror *err;
+  app_object *app;
+  if ((err = app_find(&app)) != NULL)
+    return err;
 
-  err = armeabi_mmap_internal(pages_to_bytes((mapping->end_page - mapping->start_page) + page_diff),
+  err = armeabi_mmap_internal(app,
+			      pages_to_bytes((mapping->end_page - mapping->start_page) + page_diff),
 			      mapping->prot,
 			      mapping->mmap_flags,
-			      mapping->fd,
+			      mapping->opentable_idx,
 			      mapping->offset,
 			      app_mmap_ret);
   if (err)
@@ -1467,7 +1531,7 @@ mmap_allocator_munmap_block(mmap_allocator *allocator,
 void mmap_cleanup_app(app_object *app)
 {
   TRACE("%s", __func__);
-//  abort_deregister(get_mmap_abort_handler(), (unsigned)&global.mmap_allocator_pool);
+  abort_deregister(get_mmap_abort_handler(), (unsigned)&app->mmap_table);
   app_mmap_mapping *app_mmap = (app_mmap_mapping *)app->mmap_table.entries;
   for (int i = 0; i < app->mmap_table.num_entries; i++)
     if (array_entry_is_in_use(&app_mmap[i].base))
@@ -1504,6 +1568,7 @@ appmmap_add_mapping(app_object *app,
   mmap_table_entry->mapping_idx = mapping_idx;
   mmap_table_entry->start_addr = start;
   mmap_table_entry->end_addr = end;
+  mmap_table_entry->fd = ARRAY_INVALID_INDEX;
 
   return mmap_table_entry;
 }

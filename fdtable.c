@@ -517,11 +517,16 @@ _kernel_oserror *fdtable_ftruncate(fdtable_entry *fd, off_t new_extent)
   switch (entry->type)
   {
     case opentable_type_FILE: {
-      TRACE("%s: fd=%d, new_extent=%ld, path=%s",
-	    __func__,
-	    fd,
-	    new_extent,
-	    systemfiletable_get_filename(entry->systemtable_idx));
+#if ENABLE_LOGGING
+      app_object *app;
+      if ((err = app_find(&app)) != NULL)
+	return err;
+      LOG("%s: fd=%d, new_extent=%ld, path=%s",
+	  __func__,
+	  array_get_entry_idx(&app->fd_table, &fd->base) + FDTABLE_BASE_FD,
+	  new_extent,
+	  systemfiletable_get_filename(entry->systemtable_idx));
+#endif
       err = entry
 	    ? systemfiletable_ftruncate(entry->systemtable_idx, new_extent)
 	    : armeabisupport_EBADF;
@@ -565,10 +570,13 @@ _kernel_oserror *fdtable_open_ipc(size_t size, int fd_ret[2])
 
   systemipctable_entry *sysipc_entry = (systemipctable_entry *)array_get_entry_ptr(&global.system_table[fd_type_IPC],
 										   sysipctbl_idx);
-  mmap_allocator *allocator = mmap_allocator_get_entry(sysipc_entry->allocator_idx);
-  mmap_mapping *block = mmap_mapping_get_entry(allocator, sysipc_entry->mapping_idx);
+  opentable_entry *ot_shm_entry = opentable_get_entry(sysipc_entry->opentable_idx);
+  systemshmtable_entry *sys_shm_entry = (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
+										    ot_shm_entry->systemtable_idx);
+  mmap_allocator *allocator = mmap_allocator_get_entry(sys_shm_entry->allocator_idx);
+  mmap_mapping *mapping = mmap_mapping_get_entry(allocator, sys_shm_entry->mapping_idx);
 
-  eabi_PTR write_buffer = page_to_addr(&allocator->da, block->start_page);
+  eabi_PTR write_buffer = page_to_addr(&allocator->da, mapping->start_page);
   eabi_PTR read_buffer = write_buffer + size;
 
   LOG("%s:  fd1=%d, fd2=%d, write_buffer=%X, read_buffer=%X",
@@ -631,7 +639,6 @@ error_return:
 _kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd_ret)
 {
   _kernel_oserror *err;
-  int sysshmtbl_idx = ARRAY_INVALID_INDEX;
   int opentable_idx = ARRAY_INVALID_INDEX;
 
   TRACE("%s: name=%s", __func__, name);
@@ -647,17 +654,8 @@ _kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd
   if ((err = app_find(&app)) != NULL)
     return err;
 
-  err = systemshmtable_open_shm(name, oflag, mode, &sysshmtbl_idx);
-  if (err)
+  if ((err = opentable_add_shm(name, oflag, mode, &opentable_idx)) != NULL)
     return err;
-
-  err = opentable_add_shm(sysshmtbl_idx, oflag, mode, &opentable_idx);
-  if (err)
-    {
-      array_entry_mark_unused(array_get_entry_ptr(&global.system_table[fd_type_SHM], sysshmtbl_idx));
-      return err;
-    }
-
 
 #if ENABLE_LOGGING
   opentable_entry *entry = opentable_get_entry(opentable_idx);
@@ -681,8 +679,6 @@ _kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd
 
   *fd_ret = ARRAY_INVALID_INDEX;
 
-  if (sysshmtbl_idx != ARRAY_INVALID_INDEX)
-    array_entry_mark_unused(array_get_entry_ptr(&global.system_table[fd_type_SHM], sysshmtbl_idx));
   if (opentable_idx != ARRAY_INVALID_INDEX)
     array_entry_mark_unused(array_get_entry_ptr(&global.open_table, opentable_idx));
 

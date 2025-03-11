@@ -15,10 +15,10 @@
 #include <fcntl.h>
 #include <swi.h>
 
-#define ENABLE_TRACING 1
+#define ENABLE_TRACING 0
 #include "trace.h"
 
-#define ENABLE_LOGGING 1
+#define ENABLE_LOGGING 0
 #include "log.h"
 
 #define OBJECT_TYPE_ERROR -1
@@ -280,36 +280,79 @@ _kernel_oserror *systemfiletable_open_file(const char *canon_name, int flags, in
   return err;
 }
 
-_kernel_oserror *systemfiletable_deref_entry(int filetable_idx)
+_kernel_oserror *systemfiletable_deref_entry(int sysfiletable_idx)
 {
-  TRACE("%s: filetable_idx=%d", __func__, filetable_idx);
+  TRACE("%s: sysfiletable_idx=%d", __func__, sysfiletable_idx);
 
   array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
   systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
-  if (array_entry_is_in_use(&entry[filetable_idx].table_base.array_base))
+  if (array_entry_is_in_use(&entry[sysfiletable_idx].table_base.array_base))
     {
-      entry[filetable_idx].table_base.ref_count--;
+      entry[sysfiletable_idx].table_base.ref_count--;
       LOG("%s:   System table ref count now %d for file handle %d (%s)", __func__,
-	  entry[filetable_idx].table_base.ref_count,
-	  entry[filetable_idx].file_handle,
-	  entry[filetable_idx].filename);
-      if (entry[filetable_idx].table_base.ref_count == 0)
+	  entry[sysfiletable_idx].table_base.ref_count,
+	  entry[sysfiletable_idx].file_handle,
+	  entry[sysfiletable_idx].filename);
+      if (entry[sysfiletable_idx].table_base.ref_count == 0)
 	{
 	  LOG("%s:   Closing file handle %d (%s)", __func__,
-	      entry[filetable_idx].file_handle,
-	      entry[filetable_idx].filename);
-	  if (entry[filetable_idx].file_handle > 0)
+	      entry[sysfiletable_idx].file_handle,
+	      entry[sysfiletable_idx].filename);
+	  if (entry[sysfiletable_idx].file_handle > 0)
 	    {
-	      osfile_close(entry[filetable_idx].file_handle);
-	      entry[filetable_idx].file_handle = 0;
+	      osfile_close(entry[sysfiletable_idx].file_handle);
+	      entry[sysfiletable_idx].file_handle = 0;
 	    }
-	  if (entry[filetable_idx].filename)
+	  if (entry[sysfiletable_idx].filename)
 	    {
-	      free((void *)entry[filetable_idx].filename);
-	      entry[filetable_idx].filename = NULL;
+	      free((void *)entry[sysfiletable_idx].filename);
+	      entry[sysfiletable_idx].filename = NULL;
 	    }
-	  array_entry_mark_unused(&entry[filetable_idx].table_base.array_base);
+	  array_entry_mark_unused(&entry[sysfiletable_idx].table_base.array_base);
+	  return NULL;
+	}
+    }
+
+  return armeabisupport_EINVAL;
+}
+
+_kernel_oserror *systemfiletable_deref_file(mmap_allocator *allocator,
+					    mmap_mapping *mapping,
+					    int sysfiletable_idx)
+{
+  TRACE("%s: sysfiletable_idx=%d", __func__, sysfiletable_idx);
+
+  array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
+  systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
+
+  if (array_entry_is_in_use(&entry[sysfiletable_idx].table_base.array_base))
+    {
+      entry[sysfiletable_idx].table_base.ref_count--;
+      LOG("%s:   System table ref count now %d for file handle %d (%s)", __func__,
+	  entry[sysfiletable_idx].table_base.ref_count,
+	  entry[sysfiletable_idx].file_handle,
+	  entry[sysfiletable_idx].filename);
+      if (entry[sysfiletable_idx].table_base.ref_count == 0)
+	{
+	  LOG("%s:   Closing file handle %d (%s)", __func__,
+	      entry[sysfiletable_idx].file_handle,
+	      entry[sysfiletable_idx].filename);
+	  if (entry[sysfiletable_idx].file_handle > 0)
+	    {
+	      osfile_close(entry[sysfiletable_idx].file_handle);
+	      entry[sysfiletable_idx].file_handle = 0;
+	    }
+	  if (entry[sysfiletable_idx].filename)
+	    {
+	      free((void *)entry[sysfiletable_idx].filename);
+	      entry[sysfiletable_idx].filename = NULL;
+	    }
+	  LOG("%s:   Releasing memory 0x%X from allocator %s", __func__,
+	      page_to_addr(&allocator->da, mapping->start_page),
+	      allocator->name);
+	  mmap_allocator_munmap_block(allocator, mapping);
+	  array_entry_mark_unused(&entry[sysfiletable_idx].table_base.array_base);
 	  return NULL;
 	}
     }
@@ -427,7 +470,7 @@ _kernel_oserror *opentable_unmap_file(mmap_allocator *allocator,
   systemfiletable_entry *st_entry =
 		(systemfiletable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHARED_FILE],
 							     ot_entry->systemtable_idx);
-  LOG("%s: shared memory object %p, \"%s\", open table index %d, addr=%p, len=%d, oref=%d, sref=%d",
+  LOG("%s: file object %p, \"%s\", open table index %d, addr=%p, len=%d, oref=%d, sref=%d",
        __func__,
        st_entry,
        st_entry->filename,
@@ -452,7 +495,7 @@ _kernel_oserror *opentable_unmap_file(mmap_allocator *allocator,
     }
 
   /* This will only call mmap_allocator_munmap_block() when the final reference is released.  */
-  opentable_deref_entry(block->opentable_idx);
+  opentable_deref_mmap(allocator, block);
 
   /* Don't return the error, a file error shouldn't halt the process of unmapping
    * the memory.  */

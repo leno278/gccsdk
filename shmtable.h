@@ -1,6 +1,6 @@
 /* shmtable.h
  *
- * Copyright 2024 GCCSDK Developers
+ * Copyright 2024, 2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -34,8 +34,15 @@ typedef struct _systemshmtable_entry
 
 } systemshmtable_entry;
 
+_kernel_oserror *opentable_add_shm(const char *name,
+				   int flags,
+				   int mode,
+				   int *idx_ret);
 _kernel_oserror *systemshmtable_open_shm(const char *name, int flags, int mode, int *);
-_kernel_oserror *systemshmtable_deref_shm(int systemtable_idx);
+_kernel_oserror *systemshmtable_deref_entry(int systemtable_idx);
+_kernel_oserror *systemshmtable_deref_shm(mmap_allocator *a,
+					  mmap_mapping *mapping,
+					  int systemtable_idx);
 _kernel_oserror *opentable_unmap_shm(mmap_allocator *allocator,
 				     mmap_mapping *block);
 void openshmtable_print(void);

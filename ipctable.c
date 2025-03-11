@@ -61,18 +61,42 @@ _kernel_oserror *systemipctable_open_ipc(size_t size, int *idx_ret)
 
   systemipctable_entry *entry = (systemipctable_entry *)array_get_entry_ptr(&global.system_table[fd_type_IPC], *idx_ret);
 
-  app_mmap_mapping *app_mmap;
-  if ((err = armeabi_mmap_internal(size * 2, 0, 0, -1, 0, &app_mmap)) == NULL)
+  static int count;
+  int fd;
+  char buffer[32];
+  sprintf(buffer, "IPC/%d", count++);
+  if ((err = fdtable_open_shm(buffer, O_CREAT, 0, &fd)) != NULL)
     {
-
-      entry->table_base.ref_count = 1;
-      entry->allocator_idx = app_mmap->allocator_idx;
-      entry->mapping_idx = app_mmap->mapping_idx;
-
-      LOG("%s: Return index %d for IPC object", __func__, *idx_ret);
+      LOG("%s: IPC Error: %s", __func__, err->errmess);
+      return err;
     }
 
-  return err;
+  app_object *app;
+  if ((err = app_find(&app)) != NULL)
+    {
+      LOG("%s: IPC Error: %s", __func__, err->errmess);
+      return err;
+    }
+
+  fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
+
+  app_mmap_mapping *app_mmap;
+  if ((err = armeabi_mmap_internal(app, size * 2, 0, 0, fd_entry->opentable_idx, 0, &app_mmap)) != NULL)
+    {
+      LOG("%s: IPC Error: %s", __func__, err->errmess);
+      return err;
+    }
+
+  app_mmap->fd = fd;
+
+  entry->table_base.ref_count = 1;
+  entry->opentable_idx = fd_entry->opentable_idx;
+
+  fdtable_close(app, fd_entry);
+
+  LOG("%s: Return index %d for IPC object", __func__, *idx_ret);
+
+  return NULL;
 }
 
 _kernel_oserror *systemipctable_deref_ipc(int systemtable_idx)
@@ -83,23 +107,30 @@ _kernel_oserror *systemipctable_deref_ipc(int systemtable_idx)
   if (!array_entry_is_in_use(&entry->table_base.array_base))
     return armeabisupport_EINVAL;
 
-  mmap_allocator *allocator = mmap_allocator_get_entry(entry->allocator_idx);
-  mmap_mapping *block = mmap_mapping_get_entry(allocator, entry->mapping_idx);
-
   entry->table_base.ref_count--;
+
+#if ENABLE_LOGGING
+  opentable_entry *ot_shm_entry = opentable_get_entry(entry->opentable_idx);
+  systemshmtable_entry *sys_shm_entry = (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
+										    ot_shm_entry->systemtable_idx);
+  mmap_allocator *allocator = mmap_allocator_get_entry(sys_shm_entry->allocator_idx);
+  mmap_mapping *mapping = mmap_mapping_get_entry(allocator, sys_shm_entry->mapping_idx);
+
   LOG("%s:   System table ref count now %d for IPC (%X)", __func__,
       entry->table_base.ref_count,
-      block ? page_to_addr(&allocator->da, block->start_page) : NULL);
+      mapping ? page_to_addr(&allocator->da, mapping->start_page) : NULL);
+#endif
+
   if (entry->table_base.ref_count == 0)
     {
+#if ENABLE_LOGGING
       LOG("%s:   Destroying IPC system table entry %X", __func__,
-	  block ? page_to_addr(&allocator->da, block->start_page) : NULL);
-      if (allocator && block)
-	{
-	  mmap_allocator_munmap_block(allocator, block);
-	  entry->allocator_idx = ARRAY_INVALID_INDEX;
-	  entry->mapping_idx = ARRAY_INVALID_INDEX;
-	}
+	  mapping ? page_to_addr(&allocator->da, mapping->start_page) : NULL);
+#endif
+      /* Dereference the shared memory that we use for the IPC channel.  */
+      opentable_deref_entry(entry->opentable_idx);
+      entry->opentable_idx = ARRAY_INVALID_INDEX;
+
       /* System table entry now free to re-use.  */
       array_entry_mark_unused(&entry->table_base.array_base);
     }
@@ -150,8 +181,11 @@ void systemipctable_print(void)
     {
       if (entry[i].table_base.array_base.in_use)
 	{
-	  mmap_allocator *allocator= mmap_allocator_get_entry(entry[i].allocator_idx);
-	  mmap_mapping *mapping = mmap_mapping_get_entry(allocator, entry[i].mapping_idx);
+	  opentable_entry *ot_shm_entry = opentable_get_entry(entry[i].opentable_idx);
+	  systemshmtable_entry *sys_shm_entry = (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
+										    ot_shm_entry->systemtable_idx);
+	  mmap_allocator *allocator = mmap_allocator_get_entry(sys_shm_entry->allocator_idx);
+	  mmap_mapping *mapping = mmap_mapping_get_entry(allocator, sys_shm_entry->mapping_idx);
 	  printf("  %-4d %-3d %-10s %-10X\n",
 		 i,
 		 entry[i].table_base.ref_count,
@@ -217,8 +251,11 @@ void systemipctable_log(void)
     {
       if (entry[i].table_base.array_base.in_use)
 	{
-	  mmap_allocator *allocator= mmap_allocator_get_entry(entry[i].allocator_idx);
-	  mmap_mapping *mapping = mmap_mapping_get_entry(allocator, entry[i].mapping_idx);
+	  opentable_entry *ot_shm_entry = opentable_get_entry(entry[i].opentable_idx);
+	  systemshmtable_entry *sys_shm_entry = (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
+										    ot_shm_entry->systemtable_idx);
+	  mmap_allocator *allocator = mmap_allocator_get_entry(sys_shm_entry->allocator_idx);
+	  mmap_mapping *mapping = mmap_mapping_get_entry(allocator, sys_shm_entry->mapping_idx);
 	  reporter_printf("%4d %3d %10s %10X",
 			  i,
 			  entry[i].table_base.ref_count,

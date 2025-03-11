@@ -67,20 +67,9 @@ _kernel_oserror *opentable_add_entry(opentable_type type,
 				     int systemtable_idx,
 				     opentable_methods *methods,
 				     int *idx_ret);
-_kernel_oserror *opentable_add_file(int systemtable_idx,
-				    int flags,
-				    int mode,
-				    int *idx_ret);
-_kernel_oserror *opentable_add_shm(int systemtable_idx,
-				   int flags,
-				   int mode,
-				   int *idx_ret);
-_kernel_oserror *opentable_add_ipc(int systemtable_idx,
-				   eabi_PTR write_buffer,
-				   eabi_PTR read_buffer,
-				   size_t buffer_size,
-				   int *idx_ret);
 _kernel_oserror *opentable_deref_entry(int opentable_idx);
+_kernel_oserror *opentable_deref_mmap(mmap_allocator *allocator,
+				      mmap_mapping *mapping);
 void opentable_log(void);
 
 static inline void ipc_write_int(opentable_entry *ot_entry, int value)

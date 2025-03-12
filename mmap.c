@@ -524,13 +524,7 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
   if (fd != -1)
     {
       fdtable_entry *fd_entry = get_fdtable_entry(app, fd);
-      if (!fd_entry || !array_entry_is_in_use(&fd_entry->base))
-	{
-	  /* We were given a file descriptor, but it doesn't match any that we know of.  */
-	  LOG("%s: Invalid fd (%d)", __func__, fd);
-	  return armeabisupport_EBADF;
-	}
-
+      if (fd_entry && array_entry_is_in_use(&fd_entry->base))
 	opentable_idx = fd_entry->opentable_idx;
     }
 

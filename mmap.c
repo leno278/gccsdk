@@ -701,8 +701,6 @@ armeabi_mmap_internal(app_object *app,
   else if (ot_entry && ot_entry->type == opentable_type_FILE)
     {
       ot_entry->ref_count++;
-      reporter_printf("%s: Adding mapping for file at open table index %d, offset=%d, size=%d",
-		      __func__, opentable_idx, offset, size);
     }
 
   LOG("%s: Allocated %d pages @ 0x%X from allocator %s",
@@ -1605,12 +1603,12 @@ void appmmap_list_mappings(app_object *app)
 	mmap_allocator *allocator = mmap_allocator_get_entry(entry[i].allocator_idx);
 	mmap_mapping *mapping = mmap_mapping_get_entry(allocator, entry[i].mapping_idx);
 
-	LOG("%2d) %4d -> %4d - start=0x%X end=0x%X - allocator=%s",
-	    i,
-	    mapping->start_page,
-	    mapping->end_page,
-	    entry[i].start_addr,
-	    entry[i].end_addr,
-	    allocator->name);
+	reporter_printf("%2d) %4d -> %4d - start=0x%X end=0x%X - allocator=%s",
+			i,
+			mapping->start_page,
+			mapping->end_page,
+			entry[i].start_addr,
+			entry[i].end_addr,
+			allocator->name);
       }
 }

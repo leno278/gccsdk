@@ -12,8 +12,11 @@
 #include "stack.h"
 #include "types.h"
 #include "memory.h"
-#include "shm.h"
-#include "filedesc.h"
+#include "fdtable.h"
+#include "filetable.h"
+#include "shmtable.h"
+#include "ipctable.h"
+#include "lock.h"
 #include "debug.h"
 
 static void
@@ -24,7 +27,9 @@ command_info(void)
        app;
        app = linklist_next_app_object (app))
     {
-      printf("App %X\n", app->ID);
+      printf("App (%s) %X\n", app->name, app->ID);
+
+      fdtable_print(app);
 
       allocator_dump_all(&app->allocator_list);
 
@@ -40,14 +45,17 @@ command_info(void)
   printf("Global allocators:\n");
   allocator_dump_all(&global.allocator_list);
 
-  printf("mmaps:\n");
-  allocator_dump_all(&global.mmap_allocator_pool);
+  printf("FILE TABLES:\n");
+  openfiletable_print();
+  systemfiletable_print();
 
-  printf("SHM:\n");
-  shm_dump_object_list();
+  printf("SHM TABLES:\n");
+  openshmtable_print();
+  systemshmtable_print();
 
-  printf("FDs:\n");
-  filedesc_dump_fds();
+  printf("IPC TABLES:\n");
+  openipctable_print();
+  systemipctable_print();
 }
 
 _kernel_oserror *
@@ -59,6 +67,9 @@ module_command (const char *arg_string, int argc, int number, void *pw)
     {
     case CMD_ARMEABISupport_Info:
       command_info ();
+      break;
+    case CMD_ARMEABISupport_lslocks:
+      filelocklist_lslocks ();
       break;
     }
 

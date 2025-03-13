@@ -1,14 +1,27 @@
-@ Copyright (c) 2021-2024 GCCSDK Developers
+@ Copyright (c) 2021-2025 GCCSDK Developers
 @ Written by Lee Noar
 
 #include "decl-asm.h"
 #include "debug-asm.h"
 
+			.struct 0
+ARRAY_T_ENTRIES:	.skip	4
+ARRAY_T_NUM_ENTRIES:	.skip	4
+ARRAY_T_ENTRY_SIZE:
+
+			      .struct 0
+APP_MMAP_MAPPING_BASE_USED:	.skip 4
+APP_MMAP_MAPPING_ALLOCATOR_IDX:	.skip 4
+APP_MMAP_MAPPING_MAPPING_IDX:	.skip 4
+APP_MMAP_MAPPING_START_ADDR:	.skip 4
+APP_MMAP_MAPPING_END_ADDR:	.skip 4
+APP_MMAP_MAPPING_FD:
+
 	.text
 
 @ Entry:
 @  r1 = address of fault
-@  r12 = ptr to user data
+@  r12 = ptr to user data (ptr to app_object::mmap_table)
 @ Exit:
 @  r0 = bits 0-7: ABORT_HANDLER_CLAIM if able to handle, ABORT_HANDLER_ERROR if there was an
 @	error otherwise ABORT_HANDLER_PASS_ON
@@ -16,7 +29,39 @@
 @  r12 can be corrupted
 @  All other registers preserved
 mmap_abort_handler:
-	STMFD	sp!, {r1-r8, r10, lr}
+	STMFD	sp!, {r1-r10, lr}
+
+	LDR	r10, [r12, #ARRAY_T_ENTRIES]
+	LDR	r9, [r12, #ARRAY_T_NUM_ENTRIES]
+0:
+	CMP	r9, #0
+	MOVEQ	r0, #ABORT_HANDLER_PASS_ON
+	LDMEQFD	sp!, {r1-r10, pc}	@ End of array with no match, pass on
+
+	LDR	r6, [r10, #APP_MMAP_MAPPING_START_ADDR]
+	@ Check if the fault addresss is lower than this mapping
+	CMP	r1, r6
+	BLO	next_entry
+	LDR	r7, [r10, #APP_MMAP_MAPPING_END_ADDR]
+	@ Check if the fault address is higher than this mapping
+	CMP	r1, r7
+	BHI	next_entry
+
+	REPORT_TEXT "mmap_abort_handle: Found mapping"
+	REPORT_HEX r1
+	REPORT_HEX r6
+	REPORT_HEX r7
+
+	MOV	r0, #ABORT_HANDLER_PASS_ON
+	LDMFD	sp!, {r1-r10, pc}
+
+next_entry:
+	LDR	r0, [r12, #ARRAY_T_ENTRY_SIZE]
+	ADD	r10, r10, r0
+	SUB	r9, r9, #1
+	B	0b
+#if 0
+	STMFD	sp!, {r1-r10, lr}
 
 	LDR	r10, [r12, #LINKLIST_FIRST]
 	@ r10 = mmap object
@@ -130,7 +175,7 @@ mmapabort_mmap_area:
 	MOV	r0, #ABORT_HANDLER_ERROR
 	ORR	r0, r0, #(ABORT_ERROR_MMAP_AREA << 8)
 	LDMFD	sp!, {r1-r8, r10, pc}
-
+#endif
 	.global	get_mmap_abort_handler
 get_mmap_abort_handler:
 	ADR	r0, mmap_abort_handler

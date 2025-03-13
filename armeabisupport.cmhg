@@ -15,13 +15,26 @@ finalisation-code: module_finalisation
 command-keyword-table: module_command
   ARMEABISupport_Info(min-args: 0, max-args: 0,
 	     invalid-syntax: "Syntax: *ARMEABISupport_Info",
-	     help-text: "*ARMEABISupport_Info prints information about known applications.\n")
+	     help-text: "*ARMEABISupport_Info prints information about known applications.\n"),
+  ARMEABISupport_lslocks(min-args: 0, max-args: 0,
+	     invalid-syntax: "Syntax: *ARMEABISupport_lslocks",
+	     help-text: "*ARMEABISupport_lslocks prints a list of the current file locks.\n")
 
 swi-chunk-base-number: 0x59D00
 
 swi-handler-code: module_swihandler
 
-swi-decoding-table: ARMEABISupport, MemoryOp, AbortOp, StackOp, Cleanup, MMapOp, ShmOp, FdOp
+swi-decoding-table: ARMEABISupport,
+		    MemoryOp,
+		    AbortOp,
+		    StackOp,
+		    Cleanup,
+		    MMapOp,
+		    ShmOp,
+		    FdOp,
+		    FileOp,
+		    PreExec,
+		    IPC
 
 error-chunk-base-number: 0x81DC20
 
@@ -39,4 +52,6 @@ error-identifiers: armeabisupport_bad_reason("Unknown ARMEABISupport SWI reason 
 		   armeabisupport_ENOSPC("ENOSPC: No space"),
 		   armeabisupport_EBADF("EBADF: Not a valid file descriptor"),
 		   armeabisupport_ENOMEM("ENOMEM: No memory is available"),
-		   armeabisupport_EOPSYS("EOPSYS: RISC OS system error")
+		   armeabisupport_EOPSYS("EOPSYS: RISC OS system error"),
+		   armeabisupport_EOVERFLOW("EOVERFLOW: Value too large for defined data type"),
+		   armeabisupport_EIO("EIO: Input/Output error"),

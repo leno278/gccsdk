@@ -9,7 +9,7 @@
 
 #include "types.h"
 
-_kernel_oserror *app_new(app_object **app_ret);
+_kernel_oserror *app_new(app_object **app_ret, const char *name);
 _kernel_oserror *app_find(app_object **app_ret);
 
 _kernel_oserror *armeabi_cleanup(void);

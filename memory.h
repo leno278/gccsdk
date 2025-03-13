@@ -1,6 +1,6 @@
 /* memory.h
  *
- * Copyright 2019, 2020 GCCSDK Developers
+ * Copyright 2019-2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -9,24 +9,21 @@
 
 #include <kernel.h>
 #include "link_list.h"
+#include "dynamicarea.h"
 #include "swis.h"
 #include "types.h"
 
 #define DEBUG_ALLOCATOR 0
 
-#define PAGE_SIZE 0x1000
-#define PAGE_SHIFT 12
-#define PAGE_SIZE_MASK 0xfff
-
 #define ALLOCATOR_TYPE_MASK		0xF
+#define ALLOCATOR_TYPE_MMAP		0
 #define ALLOCATOR_TYPE_PAGE		1
 #define ALLOCATOR_TYPE_HEAP		2
 #define ALLOCATOR_TYPE_SINGLE_USE	3
-#define ALLOCATOR_TYPE_MMAP		4
 #define ALLOCATOR_FLAG_GLOBAL		(1 << 5)
 #define ALLOCATOR_FLAG_ABORTTRAP	(1 << 6)
 
-#define ALLOCATOR_VALIDATE_VALUE 0x58494E55	/* "UNIX" in ASCII.  */
+#define ALLOCATOR_VALIDATE_VALUE	0x58494E55	/* "UNIX" in ASCII.  */
 
 #define MEMORYOP_NEW_ALLOCATOR		0
 #define MEMORYOP_DESTROY_ALLOCATOR 	1
@@ -53,7 +50,46 @@
 
 #define ALLOCATOR_HEAP_INITIAL_SIZE	4096
 
+typedef enum _allocator_type
+{
+  allocator_type_INVALID = -1,
+  allocator_type_MMAP = 0,
+  allocator_type_PAGE,
+  allocator_type_HEAP,
+  allocator_type_SINGLE,
+  allocator_type_MAX
+
+} allocator_type;
+
 typedef struct _armeabisupport_allocator armeabisupport_allocator;
+
+typedef struct _virtual_function_table
+{
+  _kernel_oserror * (*new)(armeabisupport_allocator *);
+  void (*destroy)(armeabisupport_allocator *);
+  _kernel_oserror * (*alloc)(armeabi_allocator_t, size_t size, unsigned flags, eabi_PTR *ret);
+  _kernel_oserror * (*free)(armeabi_allocator_t, eabi_PTR block, size_t size);
+  void (*dump)(armeabisupport_allocator *);
+#if VALIDATE_VT
+  uint32_t magic;
+#endif
+} virtual_function_table;
+
+typedef struct _armeabisupport_allocator
+{
+  link_hdr link;
+  unsigned validate;
+  dynamicarea da;
+  unsigned flags;
+  allocator_type type;
+  const virtual_function_table *vt;
+
+  /* Used by paged and mmap allocators.  */
+  link_list block_list;
+
+  char name[ALLOCATOR_NAME_MAX_LEN];
+} armeabisupport_allocator;
+LINKLIST_ACCESS_FUNCTIONS (armeabisupport_allocator)
 
 _kernel_oserror *
 memory_op(_kernel_swi_regs * r);
@@ -86,110 +122,14 @@ _kernel_oserror *
 allocator_free(armeabi_allocator_t handle,
 	       eabi_PTR block);
 
-_kernel_oserror *
-allocator_claim_pages(armeabisupport_allocator *allocator,
-		      eabi_PTR first_page_address,
-		      unsigned num_pages);
-
-_kernel_oserror *
-allocator_release_pages(armeabisupport_allocator *allocator,
-		        eabi_PTR first_page_address,
-		        unsigned num_pages);
-
-_kernel_oserror *
-allocator_map_pages (armeabisupport_allocator *allocator,
-		     eabi_PTR address,
-		     unsigned int num_pages,
-		     unsigned flags);
-
-_kernel_oserror *
-allocator_unmap_pages (armeabisupport_allocator *allocator,
-		       eabi_PTR address,
-		       unsigned num_pages);
-
-_kernel_oserror *
-allocator_mmap (armeabisupport_allocator_mmap *allocator,
-		const int required_page_count,
-		unsigned flags,
-		mmap_block **block_ret);
-
-/* Unmap and free memory where we already know the block.  */
-_kernel_oserror *
-allocator_munmap_block(armeabisupport_allocator_mmap *allocator,
-		       mmap_block *block);
-
-/* Unmap and free memory where we have an address and the number of pages.  */
-_kernel_oserror *
-allocator_munmap(armeabisupport_allocator_mmap *handle,
-		 eabi_PTR block, size_t num_pages);
-_kernel_oserror *
-allocator_mremap(armeabisupport_allocator_mmap *allocator,
-		 mmap_block *block,
-		 int page_diff,
-		 uint32_t flags,
-		 armeabisupport_allocator_mmap **allocator_ret,
-		 mmap_block **block_ret);
-
-_kernel_oserror *
-allocator_change_protection(armeabisupport_allocator_mmap *allocator,
-			    eabi_PTR addr,
-			    size_t num_pages,
-			    uint32_t flags);
 
 void allocator_destroy_all(link_list *list);
 
 /* Remove any mmap allocations from the given allocator for the given app.  */
 void
-allocator_mmap_cleanup_app(armeabisupport_allocator_mmap *allocator,
+allocator_mmap_cleanup_app(armeabisupport_allocator *allocator,
 			   app_object *app);
 
-static inline size_t
-page_align_size (size_t v)
-{
-  return (v + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1);
-}
-
-static inline eabi_PTR
-page_align_addr (eabi_PTR v)
-{
-  return (eabi_PTR) (((unsigned int) v + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1));
-}
-
-static inline int
-bytes_to_pages (size_t v)
-{
-  return (int)page_align_size (v) >> PAGE_SHIFT;
-}
-
-static inline size_t
-pages_to_bytes (int v)
-{
-  return (size_t)(v << PAGE_SHIFT);
-}
-
-/* Return TRUE if the number of bytes is a multiple of the page size.  */
-static inline int is_whole_pages(size_t bytes)
-{
-  return (bytes & (PAGE_SIZE - 1)) == 0;
-}
-
-/* Return TRUE if the address is page aligned.  */
-static inline int is_page_aligned(eabi_PTR addr)
-{
-  return ((unsigned)addr & (PAGE_SIZE - 1)) == 0;
-}
-
-static inline eabi_PTR page_to_addr(armeabisupport_allocator *allocator, uint32_t page)
-{
-  return allocator->da.base + pages_to_bytes(page);
-}
-
-static inline int
-get_page_number(armeabisupport_allocator *allocator,
-		eabi_PTR address)
-{
-  return (address - (eabi_PTR)allocator->da.base) >> PAGE_SHIFT;
-}
 
 extern void allocator_dump_all(link_list *list);
 

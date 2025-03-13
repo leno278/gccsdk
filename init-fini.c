@@ -12,11 +12,14 @@
 #include "swi.h"
 #include "abort.h"
 #include "memory.h"
-#include "filedesc.h"
+#include "shmtable.h"
+#include "filetable.h"
+#include "ipctable.h"
+#include "opentable.h"
 #include "mmap.h"
 
-#define DEBUG_PRINT 0
-#include "debug.h"
+#define ENABLE_TRACING 0
+#include "trace.h"
 
 static const char filter_name[] = "ARMEABISupport";
 
@@ -88,7 +91,17 @@ _kernel_oserror *module_initialise (const char *tail, int podule_base, void *pw)
 
   memset (&global, 0, sizeof (armeabisupport_globals));
 
-  filedesc_initialise(&global);
+  static const int systemtable_entry_size[fd_type_MAX] = {
+    sizeof(systemshmtable_entry),
+    sizeof(systemfiletable_entry),
+    sizeof(systemipctable_entry)
+  };
+
+  for (int i = 0; i < fd_type_MAX; i++)
+    array_ctor(&global.system_table[i], systemtable_entry_size[i]);
+
+  array_ctor(&global.open_table, sizeof(opentable_entry));
+  array_ctor(&global.mmap_allocator_pool, sizeof(mmap_allocator));
 
   // linklist_init_list (&global.app_list);
   // global.flags.no_client_check = false;
@@ -111,7 +124,7 @@ _kernel_oserror *module_initialise (const char *tail, int podule_base, void *pw)
 		     OS_PERMISSION_FLAG_USER_READ | OS_PERMISSION_FLAG_USER_WRITE | OS_PERMISSION_FLAG_USER_EXEC,
 		     &global.os_memory_prot_none);
 
-  dynamicarea_block test_da;
+  dynamicarea test_da;
   dynamic_area_create("abort-test", 4096, ALLOCATOR_TYPE_PAGE, &test_da);
 
   _kernel_swi_regs regs;
@@ -144,8 +157,19 @@ _kernel_oserror *module_finalisation (int fatal, int podule_base, void *pw)
   // Remove the stack allocator.
   allocator_destroy_internal(global.stack_allocator);
 
-  // Remove all mmap allocations and allocators.
-  allocator_destroy_all(&global.mmap_allocator_pool);
+  for (int i = 0; i < global.open_table.num_entries; i++)
+    if (array_entry_is_in_use(&global.open_table.entries[i]))
+      {
+	opentable_entry *ot_entry = opentable_get_entry(i);
+	if (ot_entry->type == opentable_type_FILE)
+	  filelocklist_dtor(&ot_entry->file.locks);
+      }
+
+  for (int i = 0; i < fd_type_MAX; i++)
+    array_dtor(&global.system_table[i]);
+
+  array_dtor(&global.mmap_allocator_pool);
+  array_dtor(&global.open_table);
 
   remove_pre_filter();
   remove_post_filter();

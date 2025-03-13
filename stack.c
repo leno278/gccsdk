@@ -151,7 +151,7 @@ stack_alloc(unsigned page_count, unsigned num_guard_pages, const char *name,
 
 #if NO_STACK_ABORT_HANDLER
   /* Claim/map the whole stack.  */
-  err = allocator_claim_pages(allocator, block + (num_guard_pages << PAGE_SHIFT), page_count);
+  err = dynamicarea_claim_pages(allocator, block + (num_guard_pages << PAGE_SHIFT), page_count);
   if (err)
     goto error__alloced;
 
@@ -160,18 +160,18 @@ stack_alloc(unsigned page_count, unsigned num_guard_pages, const char *name,
     goto error__claimed;
 #else
   /* Just claim/map the page at the top of the stack.  */
-  err = allocator_claim_pages(allocator, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
+  err = dynamicarea_claim_pages(&allocator->da, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
   if (err)
     goto error__alloced;
 
-  err = allocator_map_pages(allocator, block + ((num_pages_required - 1) << PAGE_SHIFT), 1, PMP_MEM_ACCESS_RWE_RWE);
+  err = dynamicarea_map_pages(&allocator->da, block + ((num_pages_required - 1) << PAGE_SHIFT), 1, PMP_MEM_ACCESS_RWE_RWE);
   if (err)
     goto error__claimed;
 #endif
 
   app_object *app;
   if ((err = app_find(&app)) != NULL)
-    err = app_new(&app);
+    err = app_new(&app, name);
 
   if (err)
     goto error__mapped;
@@ -201,9 +201,9 @@ stack_alloc(unsigned page_count, unsigned num_guard_pages, const char *name,
   return NULL;
 
 error__mapped:
-  allocator_unmap_pages(allocator, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
+  dynamicarea_unmap_pages(&allocator->da, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
 error__claimed:
-  allocator_release_pages(allocator, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
+  dynamicarea_release_pages(&allocator->da, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
 error__alloced:
 #if NO_STACK_ABORT_HANDLER
   allocator_free(allocator, block);

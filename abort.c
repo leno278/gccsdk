@@ -114,11 +114,11 @@ abort_register(void *routine, unsigned r12)
 {
   if (!routine)
     return armeabisupport_bad_param;
-  
+
   app_object *app;
   _kernel_oserror *err = app_find(&app);
   if (err)
-    err = app_new(&app);
+    err = app_new(&app, NULL);
 
   if (err)
     return err;
@@ -131,7 +131,7 @@ abort_deregister(void *routine, unsigned r12)
 {
   if (!routine)
     return armeabisupport_bad_param;
-  
+
   app_object *app;
   _kernel_oserror *err = app_find(&app);
   if (err)

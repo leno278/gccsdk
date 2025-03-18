@@ -1,6 +1,6 @@
 ; This file is part of ARMEABISupport.
 ;
-; Copyright (C) 2019-2024 GCCSDK Developers
+; Copyright (C) 2019-2025 GCCSDK Developers
 ;
 ; Written by Lee Noar
 
@@ -18,7 +18,10 @@ command-keyword-table: module_command
 	     help-text: "*ARMEABISupport_Info prints information about known applications.\n"),
   ARMEABISupport_lslocks(min-args: 0, max-args: 0,
 	     invalid-syntax: "Syntax: *ARMEABISupport_lslocks",
-	     help-text: "*ARMEABISupport_lslocks prints a list of the current file locks.\n")
+	     help-text: "*ARMEABISupport_lslocks prints a list of the current file locks.\n"),
+  ARMEABISupport_mmap_report(min-args: 0, max-args: 1,
+	     invalid-syntax: "Syntax: *ARMEABISupport_mmap_report [mmap allocator number]",
+	     help-text: "*ARMEABISupport_mmap_report prints information about a single mmap allocator, or all of them if one isn't specified.\n")
 
 swi-chunk-base-number: 0x59D00
 

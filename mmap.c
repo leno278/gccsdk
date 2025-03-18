@@ -1629,3 +1629,47 @@ void mmap_allocator_pool_destroy(void)
       }
   array_dtor(&global.mmap_allocator_pool);
 }
+
+static void mmap_allocator_report(mmap_allocator *allocator, int idx)
+{
+  if (!array_entry_is_in_use(&allocator->base))
+    return;
+
+  printf("[mmap#%2d] %d mappings\n", idx, allocator->list.count);
+  printf("%3s %9s %21s %8s %10s %10s\n",
+	 "Idx", "Pages", "Address range", "OT Idx", "Offset", "Size");
+  mmap_mapping *entry = mmap_list_get_first(&allocator->list);
+  while (entry)
+    {
+      printf("%3d %5d->%-5d %X->%X %8d %10d %10ld\n",
+	     array_get_entry_idx(&allocator->list.array, &entry->base),
+	     entry->start_page,
+	     entry->end_page,
+	     (unsigned)page_to_addr(&allocator->da, entry->start_page),
+	     (unsigned)page_to_addr(&allocator->da, entry->end_page),
+	     entry->opentable_idx,
+	     entry->offset,
+	     entry->size);
+      entry = mmap_list_get_next(&allocator->list, entry);
+    }
+}
+
+void mmap_allocator_pool_report(int allocator_idx)
+{
+  mmap_allocator *allocator = (mmap_allocator *)global.mmap_allocator_pool.entries;
+  int num_entries = global.mmap_allocator_pool.num_entries;
+
+  if (allocator_idx < -1 || allocator_idx >= num_entries)
+    {
+      printf("Outside of valid range");
+      return;
+    }
+
+  if (allocator_idx != -1)
+    mmap_allocator_report(&allocator[allocator_idx], allocator_idx);
+  else
+    {
+      for (int i = 0; i < num_entries; i++)
+	mmap_allocator_report(&allocator[i], i);
+    }
+}

@@ -1,6 +1,6 @@
 /* command.c
  *
- * Copyright 2018-2024 GCCSDK Developers
+ * Copyright 2018-2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -17,6 +17,7 @@
 #include "shmtable.h"
 #include "ipctable.h"
 #include "lock.h"
+#include "mmap.h"
 #include "debug.h"
 
 static void
@@ -71,6 +72,15 @@ module_command (const char *arg_string, int argc, int number, void *pw)
     case CMD_ARMEABISupport_lslocks:
       filelocklist_lslocks ();
       break;
+    case CMD_ARMEABISupport_mmap_report:
+      {
+	int arg = -1;
+	if (argc == 1)
+	  arg = atoi(arg_string);
+
+	mmap_allocator_pool_report(arg);
+	break;
+      }
     }
 
   return err;

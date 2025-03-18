@@ -1,6 +1,6 @@
 /* init-fini.c
  *
- * Copyright 2019-2024 GCCSDK Developers
+ * Copyright 2019-2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -168,7 +168,7 @@ _kernel_oserror *module_finalisation (int fatal, int podule_base, void *pw)
   for (int i = 0; i < fd_type_MAX; i++)
     array_dtor(&global.system_table[i]);
 
-  array_dtor(&global.mmap_allocator_pool);
+  mmap_allocator_pool_destroy();
   array_dtor(&global.open_table);
 
   remove_pre_filter();

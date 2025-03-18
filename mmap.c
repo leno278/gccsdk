@@ -1,6 +1,6 @@
 /* mmap.c
  *
- * Copyright 2021-2024 GCCSDK Developers
+ * Copyright 2021-2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -1611,4 +1611,21 @@ void appmmap_list_mappings(app_object *app)
 			entry[i].end_addr,
 			allocator->name);
       }
+}
+
+void mmap_allocator_pool_destroy(void)
+{
+  mmap_allocator *allocator = (mmap_allocator *)global.mmap_allocator_pool.entries;
+  int num_entries = global.mmap_allocator_pool.num_entries;
+  for (int i = 0; i < num_entries; i++)
+    if (array_entry_is_in_use(&allocator[i].base))
+      {
+	if (allocator[i].da.number != -1)
+	  {
+	    dynamic_area_remove(allocator[i].da.number);
+	    allocator[i].da.number = -1;
+	  }
+	mmap_list_dtor(&allocator[i].list);
+      }
+  array_dtor(&global.mmap_allocator_pool);
 }

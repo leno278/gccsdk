@@ -193,4 +193,7 @@ appmmap_get_mapping_by_index(app_object *app,
 
 void appmmap_list_mappings(app_object *app);
 
+/* Remove all dynamic areas and free all memory used in the arrays.  */
+void mmap_allocator_pool_destroy(void);
+
 #endif

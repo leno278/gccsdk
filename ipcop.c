@@ -414,6 +414,9 @@ static _kernel_oserror *ipcop_read_fds(int fd, int *fds)
 				     fds)) != NULL)
 	goto bad_fd;
 
+      if (ot_received_entry->type == opentable_type_IPC)
+	systemipctable_mmap(ot_received_entry, *fds);
+
       LOG("%s: open table index %d of type '%s' duplicated in receiver as fd %d, ref count now %d (+++)",
 	  __func__, opentable_index, opentable_type_str[ot_received_entry->type], *fds, ot_received_entry->ref_count);
 

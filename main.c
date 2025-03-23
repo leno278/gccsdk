@@ -63,6 +63,8 @@ app_new(app_object **app_ret, const char *name)
 
   linklist_add_to_end(&global.app_list, &app->link);
 
+  array_ctor(&app->mmap_table, sizeof(app_mmap_mapping));
+
   if (global.parent)
     {
       LOG("%s: Copying %d entries from fd_table of parent '%s'", __func__,
@@ -80,8 +82,6 @@ app_new(app_object **app_ret, const char *name)
     }
   else
     array_ctor(&app->fd_table, sizeof(fdtable_entry));
-
-  array_ctor(&app->mmap_table, sizeof(app_mmap_mapping));
 
   *app_ret = app;
 

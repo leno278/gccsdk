@@ -15,6 +15,8 @@
 #include <unistd.h>
 #include <swi.h>
 
+typedef struct _opentable_entry opentable_entry;
+
 typedef struct _openfiletable
 {
   int flags;
@@ -22,6 +24,10 @@ typedef struct _openfiletable
   off_t file_offset;
 
   filelock_list locks;
+
+  /* Optional mapping for this file.  */
+  mmap_allocator_t allocator_idx;
+  mmap_mapping_t mapping_idx;
 
 } openfiletable;
 
@@ -60,10 +66,7 @@ _kernel_oserror *opentable_add_file(int systemtable_idx,
 				    int mode,
 				    int *idx_ret);
 _kernel_oserror *systemfiletable_open_file(const char *file, int flags, int mode, int *);
-_kernel_oserror *systemfiletable_deref_entry(int filetable_idx);
-_kernel_oserror *systemfiletable_deref_file(mmap_allocator *a,
-					    mmap_mapping *mapping,
-					    int systemtable_idx);
+_kernel_oserror *systemfiletable_deref_entry(opentable_entry *ot_entry);
 
 _kernel_oserror *
 systemfiletable_get_info(int filetable_idx,

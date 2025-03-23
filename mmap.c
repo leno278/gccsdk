@@ -40,9 +40,6 @@
 #define MMAPOP_DUMP	16
 
 static _kernel_oserror *
-armeabi_munmap(eabi_PTR addr,
-	       size_t size);
-static _kernel_oserror *
 armeabi_madvise(eabi_PTR addr,
 		size_t size,
 		int advice);
@@ -50,7 +47,6 @@ static _kernel_oserror *
 armeabi_mprotect(void *addr,
 		 size_t len,
 		 int prot);
-static void mmap_dump(void);
 static _kernel_oserror *
 armeabi_get_info(eabi_PTR addr,
 		 eabi_PTR *mmap_addr,
@@ -235,7 +231,7 @@ mmap_op(_kernel_swi_regs *r)
 			  (unsigned)r->r[3]);
       break;
     case MMAPOP_DUMP:
-      mmap_dump();
+      mmap_allocator_pool_report(-1);
       break;
     default:
       err = armeabisupport_bad_reason;
@@ -378,21 +374,47 @@ static void mmap_list_add_before(mmap_list *list, mmap_mapping *at, mmap_mapping
     }
 }
 
-static void mmap_list_dump(mmap_list *list)
+static void mmap_list_dump(mmap_allocator *allocator, int idx)
 {
-  reporter_printf("%s: list=0x%X, count=%d",__func__,list,list->count);
-  mmap_mapping *entry = mmap_list_get_first(list);
-  if (!entry)
-    reporter_printf("%s: Empty", __func__);
-  else
-    while (entry)
+  if (!array_entry_is_in_use(&allocator->base))
+    return;
+
+  reporter_printf("[mmap#%2d] %d mappings", idx, allocator->list.count);
+  reporter_printf("%3s %9s %21s %8s %10s %10s",
+		  "Idx", "Pages", "Address range", "OT Idx", "Offset", "Size");
+  mmap_mapping *entry = mmap_list_get_first(&allocator->list);
+  while (entry)
     {
-      reporter_printf("%s: current=%-4d, prev=%d, next=%d, start=%d, end=%d",
-		      __func__,
-		      array_get_entry_idx(&list->array, &entry->base),
-		      entry->prev, entry->next,
-		      entry->start_page, entry->end_page);
-      entry = mmap_list_get_next(list, entry);
+      reporter_printf("%3d %5d->%-5d %X->%X %8d %10d %10ld",
+		      array_get_entry_idx(&allocator->list.array, &entry->base),
+		      entry->start_page,
+		      entry->end_page,
+		      (unsigned)page_to_addr(&allocator->da, entry->start_page),
+		      (unsigned)page_to_addr(&allocator->da, entry->end_page),
+		      entry->opentable_idx,
+		      entry->offset,
+		      entry->size);
+      entry = mmap_list_get_next(&allocator->list, entry);
+    }
+}
+
+void mmap_allocator_pool_dump(int allocator_idx)
+{
+  mmap_allocator *allocator = (mmap_allocator *)global.mmap_allocator_pool.entries;
+  int num_entries = global.mmap_allocator_pool.num_entries;
+
+  if (allocator_idx < -1 || allocator_idx >= num_entries)
+    {
+      reporter_printf("Outside of valid range");
+      return;
+    }
+
+  if (allocator_idx != -1)
+    mmap_list_dump(&allocator[allocator_idx], allocator_idx);
+  else
+    {
+      for (int i = 0; i < num_entries; i++)
+	mmap_list_dump(&allocator[i], i);
     }
 }
 
@@ -529,12 +551,15 @@ armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t off
     }
 
   app_mmap_mapping *mapping;
-  if ((err = armeabi_mmap_internal(app, size, prot, flags, opentable_idx, offset, &mapping)) == NULL)
+  if ((err = armeabi_mmap_internal(app, size, prot, flags, opentable_idx, offset, &mapping)) != NULL)
     {
-      *addr_ret = mapping->start_addr;
-
-      mapping->fd = fd;
+      *addr_ret = NULL;
+      return err;
     }
+
+  *addr_ret = mapping->start_addr;
+
+  mapping->fd = fd;
 
   return err;
 }
@@ -589,6 +614,46 @@ mmap_pool_allocate_memory(int num_pages,
   *mapping_idx_ret = mmap_idx;
 
   return NULL;
+}
+
+static void map_in_IPC(app_object *app,
+		       opentable_entry *ipc_ot_entry,
+		       app_mmap_mapping **app_map_ret)
+{
+  systemipctable_entry *sys_ipc_entry;
+  sys_ipc_entry = (systemipctable_entry *)array_get_entry_ptr(&global.system_table[fd_type_IPC],
+								  ipc_ot_entry->systemtable_idx);
+  app_mmap_mapping *app_map = appmmap_get_mapping_by_opentable_idx(app, sys_ipc_entry->opentable_idx);
+  if (app_map)
+    {
+      LOG("%s: Found mapping %X->%X for open table index %d",
+	  __func__, app_map->start_addr, app_map->end_addr, sys_ipc_entry->opentable_idx);
+      *app_map_ret = app_map;
+      return;
+    }
+
+  opentable_entry *shm_ot_entry = opentable_get_entry(sys_ipc_entry->opentable_idx);
+  LOG("%s: shm_ot_entry=%X", __func__, shm_ot_entry);
+
+  systemshmtable_entry *shm_sys_entry;
+  shm_sys_entry = (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
+							      shm_ot_entry->systemtable_idx);
+  LOG("%s: shm_sys_entry=%X", __func__, shm_sys_entry);
+  LOG("%s: allocator_idx=%d, mapping_idx=%d",
+      __func__, shm_sys_entry->allocator_idx, shm_sys_entry->mapping_idx);
+  mmap_allocator *allocator = mmap_allocator_get_entry(shm_sys_entry->allocator_idx);
+  mmap_mapping *mapping = mmap_mapping_get_entry(allocator, shm_sys_entry->mapping_idx);
+  LOG("%s: allocator=%X, mapping=%X", __func__, allocator, mapping);
+  LOG("%s: start page=%d, end page=%d", __func__, mapping->start_page, mapping->end_page);
+
+  shm_ot_entry->ref_count++;
+  *app_map_ret = appmmap_add_mapping(app,
+				     shm_sys_entry->allocator_idx,
+				     shm_sys_entry->mapping_idx,
+				     page_to_addr(&allocator->da, mapping->start_page),
+				     page_to_addr(&allocator->da, mapping->end_page));
+  LOG("%s: Created app mapping for open table index %d, %X->%X",
+      __func__, sys_ipc_entry->opentable_idx, (*app_map_ret)->start_addr, (*app_map_ret)->end_addr);
 }
 
 _kernel_oserror *
@@ -649,17 +714,24 @@ armeabi_mmap_internal(app_object *app,
 	      {
 		mmap_allocator *allocator = mmap_allocator_get_entry(entry[i].allocator_idx);
 		mmap_mapping *mapping = mmap_mapping_get_entry(allocator, entry[i].mapping_idx);
-		if (mapping->opentable_idx == opentable_idx)
+		if (mapping->opentable_idx == opentable_idx &&
+		    mapping->offset == offset &&
+		    mapping->size == size)
 		  {
 		    LOG("%s: Found mapping for file with open table index %d - offset=%d, size=%d",
 			__func__,
 			opentable_idx,
 			mapping->offset,
-			pages_to_bytes(mapping->end_page - mapping->start_page));
+			mapping->size);
 		    *mapping_ret = &entry[i];
 		    return NULL;
 		  }
 	      }
+	}
+      else if (ot_entry->type == opentable_type_IPC)
+	{
+	  map_in_IPC(app, ot_entry, mapping_ret);
+	  return NULL;
 	}
       }
 
@@ -686,21 +758,26 @@ armeabi_mmap_internal(app_object *app,
   block->offset = offset;
   block->size = size;
 
-  if (ot_entry && systemshm_entry)
+  if (ot_entry)
     {
-      systemshm_entry->allocator_idx = allocator_idx;
-      systemshm_entry->mapping_idx = mmap_idx;
-      ot_entry->ref_count++;
-      LOG("%s: Connecting to shm, ref count now %d for open table index %d, name=\"%s\", addr=0x%X (+++)",
-	  __func__,
-	  ot_entry->ref_count,
-	  opentable_idx,
-	  systemshm_entry->name,
-	  page_to_addr(&allocator->da, block->start_page));
-    }
-  else if (ot_entry && ot_entry->type == opentable_type_FILE)
-    {
-      ot_entry->ref_count++;
+      if (systemshm_entry)
+      {
+	systemshm_entry->allocator_idx = allocator_idx;
+	systemshm_entry->mapping_idx = mmap_idx;
+	ot_entry->ref_count++;
+	LOG("%s: Connecting to shm, ref count now %d for open table index %d, name=\"%s\", addr=0x%X (+++)",
+	    __func__,
+	    ot_entry->ref_count,
+	    opentable_idx,
+	    systemshm_entry->name,
+	    page_to_addr(&allocator->da, block->start_page));
+      }
+    else if (ot_entry->type == opentable_type_FILE)
+      {
+	ot_entry->file.allocator_idx = allocator_idx;
+	ot_entry->file.mapping_idx = mmap_idx;
+	ot_entry->ref_count++;
+      }
     }
 
   LOG("%s: Allocated %d pages @ 0x%X from allocator %s",
@@ -740,10 +817,21 @@ armeabi_munmap(eabi_PTR addr, size_t length)
   uint32_t page = get_page_number(&allocator->da, addr);
   uint32_t num_pages = bytes_to_pages(length);
 
-  mmap_mapping *mapping;
-  mapping = mmap_mapping_get_by_idx(app_mmap->allocator_idx, app_mmap->mapping_idx);
+  mmap_mapping *mapping = mmap_mapping_get_entry(allocator, app_mmap->mapping_idx);
   LOG("%s: page=%d, num_pages=%d, start_page=%d, end_page=%d",
       __func__, page, num_pages, mapping->start_page, mapping->end_page);
+
+#if ENABLE_LOGGING
+  if (page < mapping->start_page || page >= mapping->end_page)
+    {
+      LOG("%s: Warning: page %d does not fit in range %d->%d for address 0x%X",
+	  __func__, page, mapping->start_page, mapping->end_page, addr);
+      appmmap_list_mappings(app);
+      LOG("%s: mmap_allocator list:", __func__);
+      mmap_list_dump(allocator, app_mmap->allocator_idx);
+    }
+#endif
+
   if (page == mapping->start_page && num_pages == mapping->end_page - mapping->start_page)
     {
       /* Freeing whole block. Is it a shared object?  */
@@ -759,7 +847,19 @@ armeabi_munmap(eabi_PTR addr, size_t length)
 	      return armeabisupport_EBADF;
 	    }
 
-	  err = ot_entry->method->unmap(allocator, mapping);
+	  switch (ot_entry->type)
+	    {
+	      case opentable_type_SHM:
+		err = opentable_unmap_shm(allocator, mapping);
+		break;
+	      case opentable_type_FILE:
+		err = opentable_unmap_file(allocator, mapping);
+		break;
+	      default:
+		err = armeabisupport_EBADF;
+		break;
+	    }
+//	  err = ot_entry->method->unmap(allocator, mapping);
 	  if (err)
 	    {
 	      LOG("%s: OS Error: %s", __func__, err->errmess);
@@ -842,11 +942,6 @@ armeabi_madvise(eabi_PTR addr, size_t size, int advice)
     LOG("%s: OS Error %s", __func__, err->errmess);
 
   return err;
-}
-
-void mmap_dump(void)
-{
-//  allocator_dump_all(&global.mmap_allocator_pool);
 }
 
 _kernel_oserror *
@@ -1594,6 +1689,28 @@ appmmap_get_mapping_by_index(app_object *app,
   return NULL;
 }
 
+app_mmap_mapping *
+appmmap_get_mapping_by_opentable_idx(app_object *app,
+				     int opentable_idx)
+{
+  app_mmap_mapping *entry = (app_mmap_mapping *)app->mmap_table.entries;
+
+  for (int app_mmap_count = app->mmap_table.num_entries;
+       app_mmap_count;
+       app_mmap_count--, entry++)
+    {
+      if (array_entry_is_in_use(&entry->base))
+      {
+	mmap_mapping *mapping = mmap_mapping_get_by_idx(entry->allocator_idx,
+							entry->mapping_idx);
+	if (mapping->opentable_idx == opentable_idx)
+	  return entry;
+      }
+    }
+
+  return NULL;
+}
+
 void appmmap_list_mappings(app_object *app)
 {
   app_mmap_mapping *entry = (app_mmap_mapping *)app->mmap_table.entries;
@@ -1603,8 +1720,9 @@ void appmmap_list_mappings(app_object *app)
 	mmap_allocator *allocator = mmap_allocator_get_entry(entry[i].allocator_idx);
 	mmap_mapping *mapping = mmap_mapping_get_entry(allocator, entry[i].mapping_idx);
 
-	reporter_printf("%2d) %4d -> %4d - start=0x%X end=0x%X - allocator=%s",
+	reporter_printf("%2d) ot_idx=%-2d - %5d->%-5d - %X->%X - allocator=%s",
 			i,
+			mapping->opentable_idx,
 			mapping->start_page,
 			mapping->end_page,
 			entry[i].start_addr,
@@ -1661,7 +1779,7 @@ void mmap_allocator_pool_report(int allocator_idx)
 
   if (allocator_idx < -1 || allocator_idx >= num_entries)
     {
-      printf("Outside of valid range");
+      printf("Outside of valid range\n");
       return;
     }
 

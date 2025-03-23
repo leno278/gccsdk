@@ -188,7 +188,6 @@ _kernel_oserror *fdtable_close(app_object *app, fdtable_entry *fd)
 
 #if ENABLE_LOGGING
   fdtable_log(NULL);
-//  opentable_log();
 #endif
 
   _kernel_oserror *err;
@@ -667,10 +666,8 @@ _kernel_oserror *fdtable_open_shm(const char *name, int oflag, int mode, int *fd
 				 /*close_on_exec=*/false,
 				 fd_ret)) == NULL)
     {
-      LOG("%s:   returned fd=%d", __func__, *fd_ret);
-
 #if ENABLE_LOGGING
-      LOG("%s: AFTER ALLOC",__func__);
+      LOG("%s: fd=%d", __func__, *fd_ret);
       fdtable_log(app);
 #endif
 
@@ -871,6 +868,8 @@ void fdtable_copy(app_object *dst_app, app_object *src_app)
     if (array_entry_is_in_use(&fd[i].base))
       {
 	opentable_entry *open_table = opentable_get_entry(fd[i].opentable_idx);
+	if (open_table->type == opentable_type_IPC)
+	  systemipctable_mmap(open_table, i + FDTABLE_BASE_FD);
 	open_table->ref_count++;
 	LOG("%s: Ref count now %d for open table index %d", __func__, open_table->ref_count, fd[i].opentable_idx);
       }

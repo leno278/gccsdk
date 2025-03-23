@@ -23,15 +23,6 @@ typedef enum _opentable_type
 
 } opentable_type;
 
-typedef struct _opentable_methods
-{
-  _kernel_oserror *(*deref_system)(int);
-  _kernel_oserror *(*unmap)(mmap_allocator *allocator,
-			    mmap_mapping *block);
-  void (*log)(struct _opentable_entry *ot_entry);
-
-} opentable_methods;
-
 typedef struct _opentable_entry
 {
   array_entry_base array_base;
@@ -41,8 +32,6 @@ typedef struct _opentable_entry
   int systemtable_idx;
 
   opentable_type type;
-
-  opentable_methods *method;
 
   union
     {
@@ -65,11 +54,9 @@ static inline int opentable_get_index(opentable_entry *ot_entry)
 
 _kernel_oserror *opentable_add_entry(opentable_type type,
 				     int systemtable_idx,
-				     opentable_methods *methods,
 				     int *idx_ret);
 _kernel_oserror *opentable_deref_entry(int opentable_idx);
-_kernel_oserror *opentable_deref_mmap(mmap_allocator *allocator,
-				      mmap_mapping *mapping);
+
 void opentable_log(void);
 
 static inline void ipc_write_int(opentable_entry *ot_entry, int value)

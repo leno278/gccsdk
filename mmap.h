@@ -132,6 +132,7 @@ extern void mmap_cleanup_app(app_object *app);
 extern _kernel_oserror *
 armeabi_mmap(eabi_PTR addr, size_t size, int prot, int flags, int fd, size_t offset,
 	     eabi_PTR *);
+extern _kernel_oserror *armeabi_munmap(eabi_PTR addr, size_t size);
 extern _kernel_oserror *
 armeabi_mmap_internal(app_object *app, size_t size, int prot, int flags, int opentable_idx, size_t offset,
 		      app_mmap_mapping **mapping_ret);
@@ -190,8 +191,12 @@ app_mmap_mapping *
 appmmap_get_mapping_by_index(app_object *app,
 			     mmap_allocator_t allocator_idx,
 			     mmap_mapping_t mapping_idx);
+app_mmap_mapping *
+appmmap_get_mapping_by_opentable_idx(app_object *app,
+				     int opentable_idx);
 
 void appmmap_list_mappings(app_object *app);
+void mmap_allocator_pool_dump(int allocator_idx);
 
 /* Remove all dynamic areas and free all memory used in the arrays.  */
 void mmap_allocator_pool_destroy(void);

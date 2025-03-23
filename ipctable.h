@@ -36,6 +36,10 @@ typedef struct _systemipctable_entry
 {
   table_entry_base table_base;
 
+  eabi_PTR buffer;
+  size_t buffer_size;
+
+  /* The open table index of the shared memory object used as the IPC buffer.  */
   int opentable_idx;
 
 } systemipctable_entry;
@@ -47,8 +51,8 @@ _kernel_oserror *opentable_add_ipc(int systemtable_idx,
 				   int *idx_ret);
 _kernel_oserror *systemipctable_open_ipc(size_t size, int *idx_ret);
 _kernel_oserror *systemipctable_deref_ipc(int systemtable_idx);
-_kernel_oserror *opentable_unmap_ipc(mmap_allocator *allocator,
-				     mmap_mapping *block);
+_kernel_oserror *systemipctable_mmap(struct _opentable_entry *ot_entry, int fd);
+
 void openipctable_print(void);
 void systemipctable_print(void);
 

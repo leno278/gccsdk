@@ -8,7 +8,7 @@
 #include "opentable.h"
 #include "filetable.h"
 
-#define ENABLE_LOGGING 1
+#define ENABLE_LOGGING 0
 #include "log.h"
 
 #define ENABLE_TRACING 0
@@ -16,7 +16,6 @@
 
 _kernel_oserror *opentable_add_entry(opentable_type type,
 				     int systemtable_idx,
-				     opentable_methods *methods,
 				     int *idx_ret)
 {
   array_t *opentable = &global.open_table;
@@ -28,7 +27,6 @@ _kernel_oserror *opentable_add_entry(opentable_type type,
       entry->type = type;
       entry->systemtable_idx = systemtable_idx;
       entry->ref_count = 1;
-      entry->method = methods;
     }
   else
     {
@@ -51,41 +49,16 @@ _kernel_oserror *opentable_deref_entry(int opentable_idx)
 	      __func__, ot_entry->ref_count, opentable_idx);
       if (ot_entry->ref_count == 0)
 	{
-	  err = ot_entry->method->deref_system(ot_entry->systemtable_idx);
-	  ot_entry->systemtable_idx = ARRAY_INVALID_INDEX;
-	  array_entry_mark_unused(&ot_entry->array_base);
-	}
-    }
-  else
-    {
-      LOG("%s: FAIL: attempt to deref open table index %d that is no longer valid",
-	  __func__, opentable_idx);
-    }
-
-  return err;
-}
-
-_kernel_oserror *opentable_deref_mmap(mmap_allocator *allocator,
-				      mmap_mapping *mapping)
-{
-  TRACE("%s: opentable_idx=%d", __func__, mapping->opentable_idx);
-
-  _kernel_oserror *err = NULL;
-  opentable_entry *ot_entry = opentable_get_entry(mapping->opentable_idx);
-  if (ot_entry && array_entry_is_in_use(&ot_entry->array_base))
-    {
-      ot_entry->ref_count--;
-      LOG("%s: ref count now %d for open table index %d  (---)",
-	      __func__, ot_entry->ref_count, mapping->opentable_idx);
-      if (ot_entry->ref_count == 0)
-	{
 	  switch (ot_entry->type)
 	    {
 	      case opentable_type_SHM:
-		systemshmtable_deref_shm(allocator, mapping, ot_entry->systemtable_idx);
+		systemshmtable_deref_entry(ot_entry->systemtable_idx);
 		break;
 	      case opentable_type_FILE:
-		systemfiletable_deref_file(allocator, mapping, ot_entry->systemtable_idx);
+		systemfiletable_deref_entry(ot_entry);
+		break;
+	      case opentable_type_IPC:
+		systemipctable_deref_ipc(ot_entry->systemtable_idx);
 		break;
 	    }
 	  ot_entry->systemtable_idx = ARRAY_INVALID_INDEX;
@@ -95,7 +68,7 @@ _kernel_oserror *opentable_deref_mmap(mmap_allocator *allocator,
   else
     {
       LOG("%s: FAIL: attempt to deref open table index %d that is no longer valid",
-	  __func__, mapping->opentable_idx);
+	  __func__, opentable_idx);
     }
 
   return err;
@@ -112,7 +85,18 @@ void opentable_log(void)
   for (int i = 0; i < table->num_entries; i++)
     {
       if (array_entry_is_in_use(&ot_entry[i].array_base))
-	ot_entry[i].method->log(&ot_entry[i]);
+	switch (ot_entry->type)
+	  {
+	  case opentable_type_SHM:
+	    opentable_log_shm_entry(&ot_entry[i]);
+	    break;
+	  case opentable_type_FILE:
+	    opentable_log_file_entry(&ot_entry[i]);
+	    break;
+	  case opentable_type_IPC:
+	    opentable_log_ipc_entry(&ot_entry[i]);
+	    break;
+	  }
     }
 }
 

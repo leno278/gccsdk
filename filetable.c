@@ -27,15 +27,6 @@
 #define OBJECT_TYPE_DIR 2
 #define OBJECT_TYPE_IMAGE 2
 
-static void opentable_log_file_entry(opentable_entry *ot_entry);
-
-static opentable_methods file_methods =
-{
-  systemfiletable_deref_entry,
-  opentable_unmap_file,
-  opentable_log_file_entry
-};
-
 /* Return object type -1=error, 0=not found, 1=file, 2=directory, 3=image.  */
 static int file_object_type(const char *canon_filename)
 {
@@ -280,79 +271,46 @@ _kernel_oserror *systemfiletable_open_file(const char *canon_name, int flags, in
   return err;
 }
 
-_kernel_oserror *systemfiletable_deref_entry(int sysfiletable_idx)
+_kernel_oserror *systemfiletable_deref_entry(opentable_entry *ot_entry)
 {
-  TRACE("%s: sysfiletable_idx=%d", __func__, sysfiletable_idx);
+  TRACE("%s: systemtable_idx=%d", __func__, ot_entry->systemtable_idx);
 
   array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
   systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
 
-  if (array_entry_is_in_use(&entry[sysfiletable_idx].table_base.array_base))
+  if (array_entry_is_in_use(&entry[ot_entry->systemtable_idx].table_base.array_base))
     {
-      entry[sysfiletable_idx].table_base.ref_count--;
+      entry[ot_entry->systemtable_idx].table_base.ref_count--;
       LOG("%s:   System table ref count now %d for file handle %d (%s)", __func__,
-	  entry[sysfiletable_idx].table_base.ref_count,
-	  entry[sysfiletable_idx].file_handle,
-	  entry[sysfiletable_idx].filename);
-      if (entry[sysfiletable_idx].table_base.ref_count == 0)
+	  entry[ot_entry->systemtable_idx].table_base.ref_count,
+	  entry[ot_entry->systemtable_idx].file_handle,
+	  entry[ot_entry->systemtable_idx].filename);
+      if (entry[ot_entry->systemtable_idx].table_base.ref_count == 0)
 	{
 	  LOG("%s:   Closing file handle %d (%s)", __func__,
-	      entry[sysfiletable_idx].file_handle,
-	      entry[sysfiletable_idx].filename);
-	  if (entry[sysfiletable_idx].file_handle > 0)
+	      entry[ot_entry->systemtable_idx].file_handle,
+	      entry[ot_entry->systemtable_idx].filename);
+	  if (entry[ot_entry->systemtable_idx].file_handle > 0)
 	    {
-	      osfile_close(entry[sysfiletable_idx].file_handle);
-	      entry[sysfiletable_idx].file_handle = 0;
+	      osfile_close(entry[ot_entry->systemtable_idx].file_handle);
+	      entry[ot_entry->systemtable_idx].file_handle = 0;
 	    }
-	  if (entry[sysfiletable_idx].filename)
+	  if (entry[ot_entry->systemtable_idx].filename)
 	    {
-	      free((void *)entry[sysfiletable_idx].filename);
-	      entry[sysfiletable_idx].filename = NULL;
+	      free((void *)entry[ot_entry->systemtable_idx].filename);
+	      entry[ot_entry->systemtable_idx].filename = NULL;
 	    }
-	  array_entry_mark_unused(&entry[sysfiletable_idx].table_base.array_base);
-	  return NULL;
-	}
-    }
-
-  return armeabisupport_EINVAL;
-}
-
-_kernel_oserror *systemfiletable_deref_file(mmap_allocator *allocator,
-					    mmap_mapping *mapping,
-					    int sysfiletable_idx)
-{
-  TRACE("%s: sysfiletable_idx=%d", __func__, sysfiletable_idx);
-
-  array_t *filetable = &global.system_table[fd_type_SHARED_FILE];
-  systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
-
-  if (array_entry_is_in_use(&entry[sysfiletable_idx].table_base.array_base))
-    {
-      entry[sysfiletable_idx].table_base.ref_count--;
-      LOG("%s:   System table ref count now %d for file handle %d (%s)", __func__,
-	  entry[sysfiletable_idx].table_base.ref_count,
-	  entry[sysfiletable_idx].file_handle,
-	  entry[sysfiletable_idx].filename);
-      if (entry[sysfiletable_idx].table_base.ref_count == 0)
-	{
-	  LOG("%s:   Closing file handle %d (%s)", __func__,
-	      entry[sysfiletable_idx].file_handle,
-	      entry[sysfiletable_idx].filename);
-	  if (entry[sysfiletable_idx].file_handle > 0)
+	  if (ot_entry->file.allocator_idx != ARRAY_INVALID_INDEX &&
+	      ot_entry->file.mapping_idx != ARRAY_INVALID_INDEX)
 	    {
-	      osfile_close(entry[sysfiletable_idx].file_handle);
-	      entry[sysfiletable_idx].file_handle = 0;
+	      mmap_allocator *allocator = mmap_allocator_get_entry(ot_entry->file.allocator_idx);
+	      mmap_mapping *mapping = mmap_mapping_get_entry(allocator, ot_entry->file.mapping_idx);
+	      LOG("%s:   Releasing memory %X from allocator %s", __func__,
+		  page_to_addr(&allocator->da, mapping->start_page),
+		  allocator->name);
+	      mmap_allocator_munmap_block(allocator, mapping);
 	    }
-	  if (entry[sysfiletable_idx].filename)
-	    {
-	      free((void *)entry[sysfiletable_idx].filename);
-	      entry[sysfiletable_idx].filename = NULL;
-	    }
-	  LOG("%s:   Releasing memory 0x%X from allocator %s", __func__,
-	      page_to_addr(&allocator->da, mapping->start_page),
-	      allocator->name);
-	  mmap_allocator_munmap_block(allocator, mapping);
-	  array_entry_mark_unused(&entry[sysfiletable_idx].table_base.array_base);
+	  array_entry_mark_unused(&entry[ot_entry->systemtable_idx].table_base.array_base);
 	  return NULL;
 	}
     }
@@ -436,7 +394,6 @@ _kernel_oserror *opentable_add_file(int systemtable_idx, int flags, int mode, in
   _kernel_oserror *err;
   if ((err = opentable_add_entry(opentable_type_FILE,
 				 systemtable_idx,
-				 &file_methods,
 				 idx_ret)) == NULL)
     {
       opentable_entry *entry = opentable_get_entry(*idx_ret);
@@ -445,6 +402,8 @@ _kernel_oserror *opentable_add_file(int systemtable_idx, int flags, int mode, in
       entry->file.flags = flags;
       entry->file.mode = mode;
       entry->file.file_offset = 0;
+      entry->file.allocator_idx = ARRAY_INVALID_INDEX;
+      entry->file.mapping_idx = ARRAY_INVALID_INDEX;
 
       err = filelocklist_ctor(&entry->file.locks);
     }
@@ -495,7 +454,7 @@ _kernel_oserror *opentable_unmap_file(mmap_allocator *allocator,
     }
 
   /* This will only call mmap_allocator_munmap_block() when the final reference is released.  */
-  opentable_deref_mmap(allocator, block);
+  opentable_deref_entry(block->opentable_idx);
 
   /* Don't return the error, a file error shouldn't halt the process of unmapping
    * the memory.  */
@@ -545,7 +504,9 @@ void systemfiletable_print(void)
     }
 }
 
-static void opentable_log_file_entry(opentable_entry *ot_entry)
+#if ENABLE_LOGGING
+
+void opentable_log_file_entry(opentable_entry *ot_entry)
 {
   int index = opentable_get_index(ot_entry);
   systemfiletable_entry *system_entry =
@@ -561,8 +522,6 @@ static void opentable_log_file_entry(opentable_entry *ot_entry)
 		  system_entry->file_handle,
 		  system_entry->filename);
 }
-
-#if ENABLE_LOGGING
 
 void openfiletable_log(void)
 {

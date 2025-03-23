@@ -20,15 +20,6 @@
 #define ENABLE_LOGGING 0
 #include "log.h"
 
-static void opentable_log_shm_entry(opentable_entry *ot_entry);
-
-static opentable_methods shm_methods =
-{
-  systemshmtable_deref_entry,
-  opentable_unmap_shm,
-  opentable_log_shm_entry
-};
-
 /* See if we already have a shared memory object with this name open and return
  * the index if so, otherwise ARRAY_INVALID_INDEX.  */
 int systemshmtable_shm_exists(const char *name)
@@ -114,52 +105,16 @@ _kernel_oserror *systemshmtable_deref_entry(int systemtable_idx)
 	  LOG("%s:   Destroying system table entry %s", __func__, entry->name);
 	  if (allocator && block)
 	    {
+	      LOG("%s:   Releasing memory %X from allocator %s", __func__,
+		  page_to_addr(&allocator->da, block->start_page),
+		  allocator->name);
 	      mmap_allocator_munmap_block(allocator, block);
 	      entry->allocator_idx = ARRAY_INVALID_INDEX;
 	      entry->mapping_idx = ARRAY_INVALID_INDEX;
 	    }
-	  if (entry->name)
+	  else
 	    {
-	      free((void *)entry->name);
-	      entry->name = NULL;
-	    }
-	  /* Sytem table entry now free to re-use.  */
-	  array_entry_mark_unused(&entry->table_base.array_base);
-	  return NULL;
-	}
-    }
-  else
-    {
-      LOG("%s: FAIL: attempt to deref system shm entry %d that is no longer valid",
-	  __func__, systemtable_idx);
-    }
-
-  return armeabisupport_EINVAL;
-}
-
-_kernel_oserror *systemshmtable_deref_shm(mmap_allocator *allocator,
-					  mmap_mapping *mapping,
-					  int systemtable_idx)
-{
-  TRACE("%s: systemtable_idx=%d", __func__, systemtable_idx);
-
-  systemshmtable_entry *entry = (systemshmtable_entry *)array_get_entry_ptr(&global.system_table[fd_type_SHM],
-									    systemtable_idx);
-  if (entry && array_entry_is_in_use(&entry->table_base.array_base))
-    {
-      entry->table_base.ref_count--;
-      LOG("%s:   Ref count now %d for system table entry %s (%X)", __func__,
-	  entry->table_base.ref_count,
-	  entry->name,
-	  mapping ? page_to_addr(&allocator->da, mapping->start_page) : NULL);
-      if (entry->table_base.ref_count == 0)
-	{
-	  LOG("%s:   Destroying system table entry %s", __func__, entry->name);
-	  if (allocator && mapping)
-	    {
-	      mmap_allocator_munmap_block(allocator, mapping);
-	      entry->allocator_idx = ARRAY_INVALID_INDEX;
-	      entry->mapping_idx = ARRAY_INVALID_INDEX;
+	      LOG("%s:   Invalid allocator or mapping, failed to release memory", __func__);
 	    }
 	  if (entry->name)
 	    {
@@ -195,7 +150,6 @@ _kernel_oserror *opentable_add_shm(const char *name,
 
   if ((err = opentable_add_entry(opentable_type_SHM,
 				 sysshmtbl_idx,
-				 &shm_methods,
 				 idx_ret)) != NULL)
     {
       LOG("%s:     err=%s", __func__, err->errmess);
@@ -238,7 +192,7 @@ _kernel_oserror *opentable_unmap_shm(mmap_allocator *allocator,
 #endif
 
   /* This will only call allocator_munmap_block() when the final reference is released.  */
-  opentable_deref_mmap(allocator, block);
+  opentable_deref_entry(block->opentable_idx);
 
   return NULL;
 }
@@ -269,22 +223,29 @@ void systemshmtable_print(void)
   systemshmtable_entry *entry = (systemshmtable_entry *)table->entries;
 
   printf("SHM System Table:\n");
-  printf("  %-4s %-4s %-6s %-7s %s\n", "IDX", "REF", "ALLOC", "MAPPING", "NAME");
+  printf("  %-4s %-4s %-6s %-7s %21s %s\n", "IDX", "REF", "ALLOC", "MAPPING", "ADDRESS RANGE", "NAME");
   for (int i = 0; i < table->num_entries; i++)
     {
       if (entry[i].table_base.array_base.in_use)
 	{
-	  printf("  %-4d %-4d %-6d %-7d %s\n",
+	  mmap_allocator *allocator = mmap_allocator_get_entry(entry[i].allocator_idx);
+	  mmap_mapping *mapping = mmap_mapping_get_entry(allocator,
+							 entry[i].mapping_idx);
+	  printf("  %-4d %-4d %-6d %-7d %X->%X %s\n",
 		 i,
 		 entry[i].table_base.ref_count,
 		 entry[i].allocator_idx,
 		 entry[i].mapping_idx,
+		 (unsigned)page_to_addr(&allocator->da, mapping->start_page),
+		 (unsigned)page_to_addr(&allocator->da, mapping->end_page),
 		 entry[i].name);
 	}
     }
 }
 
-static void opentable_log_shm_entry(opentable_entry *ot_entry)
+#if ENABLE_LOGGING
+
+void opentable_log_shm_entry(opentable_entry *ot_entry)
 {
   int index = opentable_get_index(ot_entry);
   systemshmtable_entry *system_entry =
@@ -303,7 +264,6 @@ static void opentable_log_shm_entry(opentable_entry *ot_entry)
 		  system_entry->name);
 }
 
-#if ENABLE_LOGGING
 void openshmtable_log(void)
 {
   array_t *table = &global.open_table;

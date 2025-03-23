@@ -15,17 +15,8 @@
 #define ENABLE_TRACING 0
 #include "trace.h"
 
-#define ENABLE_LOGGING 1
+#define ENABLE_LOGGING 0
 #include "log.h"
-
-static void opentable_log_ipc_entry(opentable_entry *ot_entry);
-
-static opentable_methods ipc_methods =
-{
-  systemipctable_deref_ipc,
-  opentable_unmap_ipc,
-  opentable_log_ipc_entry
-};
 
 _kernel_oserror *opentable_add_ipc(int systemtable_idx,
 				   eabi_PTR write_buffer,
@@ -36,7 +27,6 @@ _kernel_oserror *opentable_add_ipc(int systemtable_idx,
   _kernel_oserror *err;
   if ((err = opentable_add_entry(opentable_type_IPC,
 				 systemtable_idx,
-				 &ipc_methods,
 				 idx_ret)) == NULL)
     {
       opentable_entry *entry = opentable_get_entry(*idx_ret);
@@ -90,6 +80,9 @@ _kernel_oserror *systemipctable_open_ipc(size_t size, int *idx_ret)
   app_mmap->fd = fd;
 
   entry->table_base.ref_count = 1;
+  entry->buffer = app_mmap->start_addr;
+  entry->buffer_size = size * 2;
+
   entry->opentable_idx = fd_entry->opentable_idx;
 
   fdtable_close(app, fd_entry);
@@ -128,7 +121,7 @@ _kernel_oserror *systemipctable_deref_ipc(int systemtable_idx)
 	  mapping ? page_to_addr(&allocator->da, mapping->start_page) : NULL);
 #endif
       /* Dereference the shared memory that we use for the IPC channel.  */
-      opentable_deref_entry(entry->opentable_idx);
+      armeabi_munmap(entry->buffer, entry->buffer_size);
       entry->opentable_idx = ARRAY_INVALID_INDEX;
 
       /* System table entry now free to re-use.  */
@@ -138,12 +131,17 @@ _kernel_oserror *systemipctable_deref_ipc(int systemtable_idx)
   return NULL;
 }
 
-_kernel_oserror *opentable_unmap_ipc(mmap_allocator *allocator,
-				     mmap_mapping *block)
+_kernel_oserror *systemipctable_mmap(opentable_entry *ot_entry, int fd)
 {
-  /* NOOP  */
-  LOG("%s: NOOP", __func__);
-  return NULL;
+  systemipctable_entry *entry;
+  entry = (systemipctable_entry *)array_get_entry_ptr(&global.system_table[fd_type_IPC],
+						      ot_entry->systemtable_idx);
+  eabi_PTR addr;
+  _kernel_oserror *err = armeabi_mmap(0, entry->buffer_size, 0, 0, fd, 0, &addr);
+  if (err)
+    LOG("%s: Error=%s",__func__,err->errmess);
+
+  return err;
 }
 
 void openipctable_print(void)
@@ -196,7 +194,7 @@ void systemipctable_print(void)
     }
 }
 
-static void opentable_log_ipc_entry(opentable_entry *ot_entry)
+void opentable_log_ipc_entry(opentable_entry *ot_entry)
 {
   int index = opentable_get_index(ot_entry);
   systemipctable_entry *system_entry =

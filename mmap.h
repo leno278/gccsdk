@@ -155,9 +155,6 @@ mmap_allocator_change_protection(mmap_allocator *allocator,
 				 size_t num_pages,
 				 uint32_t flags);
 
-_kernel_oserror *
-mmap_new_allocator(mmap_allocator_t *idx_ret);
-
 /* Unmap and free memory where we have an address and the number of pages.  */
 _kernel_oserror *
 mmap_allocator_munmap(mmap_allocator *handle,

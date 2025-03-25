@@ -68,6 +68,8 @@ static _kernel_oserror *
 armeabi_msync (eabi_PTR addr,
 	       size_t len,
 	       unsigned flags);
+static _kernel_oserror *
+mmap_new_allocator(size_t, mmap_allocator_t *idx_ret);
 static void
 mmap_allocator_destroy(mmap_allocator * allocator);
 
@@ -576,24 +578,39 @@ mmap_pool_allocate_memory(int num_pages,
   mmap_allocator *allocator = (mmap_allocator *)global.mmap_allocator_pool.entries;
   mmap_mapping_t mmap_idx = ARRAY_INVALID_INDEX;
   mmap_allocator_t allocator_idx;
-  for (allocator_idx = 0; allocator_idx < global.mmap_allocator_pool.num_entries; allocator_idx++)
-    if (array_entry_is_in_use(&allocator[allocator_idx].base))
-      {
-	err = mmap_allocator_mmap(allocator_idx,
-				  num_pages,
-				  ALLOCATOR_ALLOC_FLAG_MAP,
-				  &mmap_idx);
-	if (!err && mmap_idx != ARRAY_INVALID_INDEX)
-	  break;
-      }
+
+  /* Don't bother looking through existing allocators for an allocation greater than
+   * MMAP_MAX_DA_SIZE, just go straight to creating a new one.  */
+  if (num_pages <= (MMAP_MAX_DA_SIZE >> PAGE_SHIFT))
+    {
+      for (allocator_idx = 0; allocator_idx < global.mmap_allocator_pool.num_entries; allocator_idx++)
+	if (array_entry_is_in_use(&allocator[allocator_idx].base))
+	  {
+	    err = mmap_allocator_mmap(allocator_idx,
+				      num_pages,
+				      ALLOCATOR_ALLOC_FLAG_MAP,
+				      &mmap_idx);
+	    if (!err && mmap_idx != ARRAY_INVALID_INDEX)
+	      break;
+	  }
+    }
+  else
+    LOG("%s: Large allocation request of %d bytes, creating new allocator",
+	__func__, num_pages << PAGE_SHIFT);
 
   if (err || mmap_idx == ARRAY_INVALID_INDEX)
     {
       /* Failed to get an allocation from an existing allocator, create a new one.  */
       LOG("%s: Failed to get allocation from existing allocator, creating new allocator", __func__);
-      if ((err = mmap_new_allocator(&allocator_idx)) == NULL)
+      /* We have a default dynamic area maximum size of MMAP_MAX_DA_SIZE (100MB) to reduce
+       * address map exhaustion, but if we get a request for anything more than that, then
+       * create a one of allocator of the exact size required.  */
+      size_t size = num_pages <= (MMAP_MAX_DA_SIZE >> PAGE_SHIFT)
+			? MMAP_MAX_DA_SIZE
+			: num_pages << PAGE_SHIFT;
+      if ((err = mmap_new_allocator(size, &allocator_idx)) == NULL)
 	{
-	  LOG("%s",__LINE__,__func__);
+	  LOG("%s: Allocator mmap#%d created of max size %d",__func__, allocator_idx, size);
 	  err = mmap_allocator_mmap(allocator_idx,
 				    num_pages,
 				    ALLOCATOR_ALLOC_FLAG_MAP,
@@ -1201,9 +1218,12 @@ armeabi_msync (eabi_PTR addr,
 }
 
 _kernel_oserror *
-mmap_new_allocator(mmap_allocator_t *idx_ret)
+mmap_new_allocator(size_t size, mmap_allocator_t *idx_ret)
 {
   *idx_ret = ARRAY_INVALID_INDEX;
+
+  if (!size)
+    return armeabisupport_EINVAL;
 
   LOG("%s: Allocate mmap_allocator", __func__);
   _kernel_oserror *err;
@@ -1216,11 +1236,12 @@ mmap_new_allocator(mmap_allocator_t *idx_ret)
   snprintf(allocator->name, ALLOCATOR_NAME_MAX_LEN, "mmap#%d", *idx_ret);
 
   if ((err = dynamic_area_create (allocator->name,
-				  MMAP_MAX_DA_SIZE,
+				  size,
 				  ALLOCATOR_TYPE_MMAP,
 				  &allocator->da)) == NULL)
     {
-      LOG("%s: New allocator %s created with base 0x%X", __func__, allocator->name, allocator->da.base);
+      LOG("%s: New allocator %s created of size %d bytes, with base 0x%X",
+	  __func__, allocator->name, size, allocator->da.base);
       mmap_list_ctor(&allocator->list);
       return NULL;
     }

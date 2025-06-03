@@ -28,7 +28,8 @@ int systemshmtable_shm_exists(const char *name)
   systemshmtable_entry *entry = (systemshmtable_entry *)global.system_table[fd_type_SHM].entries;
 
   for (int i = 0; i < num_entries; i++)
-    if (strcmp(entry[i].name, name) == 0)
+    if (array_entry_is_in_use(&entry[i].table_base.array_base) &&
+	strcmp(entry[i].name, name) == 0)
       return i;
 
   return ARRAY_INVALID_INDEX;

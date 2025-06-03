@@ -70,7 +70,8 @@ static int filetable_scan_for_canon_filename(const char *canon_filename)
   systemfiletable_entry *entry = (systemfiletable_entry *)filetable->entries;
   int i;
   for (i = 0; i < filetable->num_entries; i++)
-    if (strcmp(entry[i].filename, canon_filename) == 0)
+    if (array_entry_is_in_use(&entry[i].table_base.array_base) &&
+	strcmp(entry[i].filename, canon_filename) == 0)
       return i;
 
   return ARRAY_INVALID_INDEX;

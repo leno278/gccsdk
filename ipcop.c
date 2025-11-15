@@ -467,27 +467,27 @@ static _kernel_oserror *ipcop_status(int fd, unsigned *flags_ret)
   if ((fd_entry = get_fdtable_entry(app, fd)) == NULL ||
       !array_entry_is_in_use(&fd_entry->base))
     {
-      LOG("%s: fd=%d, fd_entry=%p", __func__, fd, fd_entry);
+      LOG("%s: fd=%d, fd_entry=%p : armeabisupport_EBADF", __func__, fd, fd_entry);
       return armeabisupport_EBADF;
     }
 
   opentable_entry *ot_entry1 = opentable_get_entry(fd_entry->opentable_idx);
   if (!ot_entry1 || !array_entry_is_in_use(&ot_entry1->array_base))
     {
-      LOG("%s: fd=%d, ot_entry1 == NULL", __func__, fd);
+      LOG("%s: fd=%d, ot_entry1 == NULL : armeabisupport_EBADF", __func__, fd);
       return armeabisupport_EBADF;
     }
 
   opentable_entry *ot_entry2 = opentable_get_entry(ot_entry1->ipc.opentable_oppend_idx);
   if (!ot_entry2 || !array_entry_is_in_use(&ot_entry2->array_base))
     {
-      LOG("%s: fd=%d, ot_entry2 == NULL", __func__, fd);
+      LOG("%s: fd=%d, ot_entry2 == NULL : armeabisupport_EBADF", __func__, fd);
       return armeabisupport_EBADF;
     }
 
   if (ot_entry1->type != opentable_type_IPC || ot_entry2->type != opentable_type_IPC)
     {
-      LOG("%s: opentable_entry not of type IPC for FD %d: armeabisupport_EBADF", __func__, fd);
+      LOG("%s: opentable_entry not of type IPC for FD %d : armeabisupport_EBADF", __func__, fd);
       return armeabisupport_EBADF;
     }
 

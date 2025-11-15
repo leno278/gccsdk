@@ -1005,6 +1005,12 @@ armeabi_get_info(eabi_PTR addr,
     return err;
 
   app_mmap_mapping *app_mapping = appmmap_get_mapping(app, addr);
+  if (!app_mapping)
+    {
+      LOG("armeabi_get_info: Failed to find mapping for address 0x%X for this app", addr);
+      return armeabisupport_ENOMEM;
+    }
+
   mmap_allocator *allocator = mmap_allocator_get_entry(app_mapping->allocator_idx);
   if (!allocator)
     {

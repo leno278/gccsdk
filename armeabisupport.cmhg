@@ -58,3 +58,4 @@ error-identifiers: armeabisupport_bad_reason("Unknown ARMEABISupport SWI reason 
 		   armeabisupport_EOPSYS("EOPSYS: RISC OS system error"),
 		   armeabisupport_EOVERFLOW("EOVERFLOW: Value too large for defined data type"),
 		   armeabisupport_EIO("EIO: Input/Output error"),
+		   armeabisupport_bad_stack("Stack error")

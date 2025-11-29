@@ -147,7 +147,7 @@ stack_alloc(unsigned page_count, unsigned num_guard_pages, const char *name,
   unsigned num_pages_required = page_count + num_guard_pages;
   err = allocator_alloc(allocator, num_pages_required, ALLOCATOR_ALLOC_FLAG_ALLOC_ONLY, (eabi_PTR *)&block);
   if (err)
-    return err;
+    return err == armeabisupport_ENOMEM ? armeabisupport_bad_stack : err;
 
 #if NO_STACK_ABORT_HANDLER
   /* Claim/map the whole stack.  */

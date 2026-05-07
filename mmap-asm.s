@@ -47,7 +47,7 @@ mmap_abort_handler:
 	CMP	r1, r7
 	BHI	next_entry
 
-	REPORT_TEXT "mmap_abort_handle: Found mapping"
+	REPORT_TEXT "mmap_abort_handle: Mapping not found, passing on"
 	REPORT_HEX r1
 	REPORT_HEX r6
 	REPORT_HEX r7

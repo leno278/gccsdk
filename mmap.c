@@ -1,6 +1,6 @@
 /* mmap.c
  *
- * Copyright 2021-2025 GCCSDK Developers
+ * Copyright 2021-2026 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -1121,8 +1121,13 @@ _kernel_oserror *
 armeabi_get_page_protection (eabi_PTR addr, int *prot_ret)
 {
   mmap_allocator *allocator = get_allocator_ptr(addr);
-  int page = get_page_number(&allocator->da, addr);
+  if (!allocator)
+    {
+      LOG("%s: Failed to find address (%p) in mmap allocator pool", __func__, addr);
+      return armeabisupport_ENOMEM;
+    }
 
+  int page = get_page_number(&allocator->da, addr);
   pmp_page_info_entry entry;
   entry.pmp_page_index = page;
   entry.physical_page_number = -1;

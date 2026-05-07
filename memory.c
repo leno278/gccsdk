@@ -1,6 +1,6 @@
 /* memory.c
  *
- * Copyright 2019-2024 GCCSDK Developers
+ * Copyright 2019-2026 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -588,7 +588,7 @@ allocator_alloc (armeabi_allocator_t handle,
      /* No free block big enough - extend dynamic area.  */
       dynamicarea *da = &allocator->da;
       int extra_pages_required;
-      void *block_addr;
+      eabi_PTR block_addr;
 
       /* If the last block is a free one, then we can extend it.  */
       memblock *last_block =
@@ -598,17 +598,27 @@ allocator_alloc (armeabi_allocator_t handle,
 	{
 	  extra_pages_required = required_page_count - last_block->page_count;
 	  block_addr = last_block->start_addr;
+
+	  if (block_addr + pages_to_bytes(required_page_count) > da->base + pages_to_bytes(da->max_size))
+	    return armeabisupport_ENOMEM;
+
 #if DEBUG_ALLOCATOR
 	  DEBUG_OUTPUT("  %s: Last block is free: address (%p), num_pages (%d)",
 			__func__, last_block->start_addr, last_block->page_count);
 #endif
+	  last_block->page_count += extra_pages_required;
+	  last_block->end_addr += pages_to_bytes(extra_pages_required);
+	  last_block->type = block_type_allocated;
 	}
       else
 	{
 	  extra_pages_required = required_page_count;
-	  block_addr = da->base + pages_to_bytes (da->size);//da->end;
+	  block_addr = da->base + pages_to_bytes (da->size);
+	  if (block_addr + pages_to_bytes(required_page_count) > da->base + pages_to_bytes(da->max_size))
+	    return armeabisupport_ENOMEM;
+
 	  if ((err = add_allocated_block_to_end (allocator,
-						 da->base + pages_to_bytes (da->size),//da->end,
+						 da->base + pages_to_bytes (da->size),
 						 required_page_count)) != NULL)
 	    return err;
 #if DEBUG_ALLOCATOR
@@ -620,13 +630,6 @@ allocator_alloc (armeabi_allocator_t handle,
       *block_ret = block_addr;
 
       da->size += extra_pages_required;
-
-      if (last_block && last_block->type == block_type_free)
-	{
-	  last_block->page_count += extra_pages_required;
-	  last_block->end_addr += pages_to_bytes(extra_pages_required);
-	  last_block->type = block_type_allocated;
-	}
     }
 
 #if DEBUG_ALLOCATOR

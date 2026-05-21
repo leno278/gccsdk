@@ -1,6 +1,6 @@
 /* abort.c
  *
- * Copyright (c) 2019-2024 GCCSDK Developers
+ * Copyright (c) 2019-2026 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -66,10 +66,10 @@ abort_op(_kernel_swi_regs *r)
       err = abort_deregister((void *)r->r[1], (unsigned)r->r[2]);
       break;
     case ABORTOP_INSTALL:
-      err = !global.aborttrap_enabled ? abort_install() : NULL;
+      abort_install();
       break;
     case ABORTOP_REMOVE:
-      err = !global.aborttrap_enabled ? abort_remove() : NULL;
+      abort_remove();
       break;
     case ABORTOP_READ_STATUS:
       r->r[0] = abort_read_error_status();

@@ -604,7 +604,7 @@ mmap_pool_allocate_memory(int num_pages,
       LOG("%s: Failed to get allocation from existing allocator, creating new allocator", __func__);
       /* We have a default dynamic area maximum size of MMAP_MAX_DA_SIZE (100MB) to reduce
        * address map exhaustion, but if we get a request for anything more than that, then
-       * create a one of allocator of the exact size required.  */
+       * create a one off allocator of the exact size required.  */
       size_t size = num_pages <= (MMAP_MAX_DA_SIZE >> PAGE_SHIFT)
 			? MMAP_MAX_DA_SIZE
 			: num_pages << PAGE_SHIFT;

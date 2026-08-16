@@ -1,6 +1,6 @@
 /* stack.c
  *
- * Copyright 2019-2021 GCCSDK Developers
+ * Copyright 2019-2026 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -151,11 +151,11 @@ stack_alloc(unsigned page_count, unsigned num_guard_pages, const char *name,
 
 #if NO_STACK_ABORT_HANDLER
   /* Claim/map the whole stack.  */
-  err = dynamicarea_claim_pages(allocator, block + (num_guard_pages << PAGE_SHIFT), page_count);
+  err = dynamicarea_claim_pages(&allocator->da, block + (num_guard_pages << PAGE_SHIFT), page_count);
   if (err)
     goto error__alloced;
 
-  err = allocator_map_pages(allocator, block + (num_guard_pages << PAGE_SHIFT), page_count, PMP_MEM_ACCESS_RWE_RWE);
+  err = dynamicarea_map_pages(&allocator->da, block + (num_guard_pages << PAGE_SHIFT), page_count, PMP_MEM_ACCESS_RWE_RWE);
   if (err)
     goto error__claimed;
 #else

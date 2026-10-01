@@ -1,3 +1,8 @@
+Sun Sep 27 12:03:55 BST 2026  Lee Noar  <lee.noar@sky.com>
+
+	* mmap.c(mmap_allocator_move_block): Fix remap to read mapping from the
+	  correct allocator.
+
 Sun Aug 16 2026  Lee Noar  <lee.noar@sky.com>
 
 	* stack.c(stack_alloc): Fix build when NO_STACK_ABORT_HANDLER is not zero.

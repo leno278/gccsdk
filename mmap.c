@@ -1477,7 +1477,14 @@ mmap_allocator_move_block(app_mmap_mapping *app_mmap,
     }
 
   mmap_allocator *new_allocator = mmap_allocator_get_entry((*app_mmap_ret)->allocator_idx);
-  mmap_mapping *new_mapping = mmap_mapping_get_entry(allocator, (*app_mmap_ret)->mapping_idx);
+  mmap_mapping *new_mapping = mmap_mapping_get_entry(new_allocator, (*app_mmap_ret)->mapping_idx);
+
+  if (!new_mapping)
+    {
+      LOG("%s: Failed to find new mapping in new allocator", __func__);
+      *app_mmap_ret = NULL;
+      return armeabisupport_ENOMEM;
+    }
 
   /* Copy the contents of the old mapping to the new.  */
   memcpy(page_to_addr(&new_allocator->da, new_mapping->start_page),

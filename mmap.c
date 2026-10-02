@@ -1446,7 +1446,7 @@ _kernel_oserror *mmap_allocator_change_protection(mmap_allocator *allocator,
     p++;
   }
 
-  block->mmap_flags = flags;
+  block->access = flags;
 
   return NULL;
 }

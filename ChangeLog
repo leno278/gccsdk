@@ -1,3 +1,8 @@
+Fri Oct  2 20:48:56 BST 2026  Lee Noar  <lee.noar@sky.com>
+
+	* mmap.c(mmap_allocator_change_protection): Don't overwrite the mmap flags
+	with the OS memory access flags.
+
 Sun Sep 27 12:03:55 BST 2026  Lee Noar  <lee.noar@sky.com>
 
 	* mmap.c(mmap_allocator_move_block): Fix remap to read mapping from the

@@ -1,3 +1,8 @@
+Sat Oct  3 17:13:58 BST 2026  Lee Noar  <lee.noar@sky.com>
+
+	* mmap.c(mmap_allocator_change_protection): num_pages is unsigned and cannot be less than
+	zero. Just check for zero instead.
+
 Sat Oct  3 17:01:57 BST 2026  Lee Noar  <lee.noar@sky.com>
 
 	* mmap.c(armeabi_get_page_protection): Fix potential NULL dereference. If the page

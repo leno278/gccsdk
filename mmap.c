@@ -1398,7 +1398,7 @@ _kernel_oserror *mmap_allocator_change_protection(mmap_allocator *allocator,
   _kernel_oserror *err = NULL;
   pmp_page_info_entry entry;
 
-  if (num_pages < 0)
+  if (num_pages == 0)
     return armeabisupport_page_map_error;
 
   int page = get_page_number(&allocator->da, addr);

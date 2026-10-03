@@ -1134,11 +1134,17 @@ armeabi_get_page_protection (eabi_PTR addr, int *prot_ret)
   entry.da_page_number = -1;
   entry.flags = 0;
   _kernel_oserror *err = dynamic_pmp_page_info(allocator->da.number, &entry, 1);
-  if (err || entry.da_page_number == -1)
+  if (err)
     {
       LOG("armeabi_get_page_protection: dynamic_pmp_page_info error: %s", err->errmess);
       return armeabisupport_page_map_error;
     }
+
+  if (entry.da_page_number == -1)
+    {
+      LOG("armeabi_get_page_protection: page not mapped");
+      return armeabisupport_page_map_error;
+  }
 
   int flags = get_access_permissions(entry.flags);
   int prot = PROT_NONE;

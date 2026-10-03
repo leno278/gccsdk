@@ -1,3 +1,8 @@
+Sat Oct  3 17:01:57 BST 2026  Lee Noar  <lee.noar@sky.com>
+
+	* mmap.c(armeabi_get_page_protection): Fix potential NULL dereference. If the page
+	fails to map but doesn't return an OS error, then don't try to dereference the error.
+
 Fri Oct  2 20:48:56 BST 2026  Lee Noar  <lee.noar@sky.com>
 
 	* mmap.c(mmap_allocator_change_protection): Don't overwrite the mmap flags

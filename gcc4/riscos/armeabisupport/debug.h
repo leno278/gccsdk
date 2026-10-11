@@ -42,7 +42,7 @@ reporter_printf(format, ##__VA_ARGS__); \
 #endif
 
 
-#ifdef DEBUG_REPORT_SWI_ERROR
+#if DEBUG_REPORT_SWI_ERROR
 extern void report_swi_error(const char *func, int line, _kernel_oserror *err);
 #define DEBUG_OUTPUT_SWI_ERROR(err) report_swi_error(__func__, __LINE__, err)
 #else

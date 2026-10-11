@@ -1,6 +1,6 @@
 /* abort.h
  *
- * Copyright 2019-2021 GCCSDK Developers
+ * Copyright 2019-2024 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -20,6 +20,7 @@ struct _app_object;
 #define ABORTOP_INSTALL			2
 #define ABORTOP_REMOVE			3
 #define ABORTOP_READ_STATUS		4
+#define ABORTOP_GET_FLAGS		5
 
 typedef struct abort_handler
 {
@@ -36,7 +37,8 @@ typedef enum abort_error
   abort_ERROR_STACK_OVERFLOW,	/* The abort was because of stack overflow.  */
   abort_ERROR_STACK_INTERNAL,	/* A SWI gave an error.  */
   abort_ERROR_MMAP_AREA,	/* Abort in unallocated area of mmap da.  */
-  abort_ERROR_MMAP_INTERNAL	/* A SWI gave an error.  */
+  abort_ERROR_MMAP_INTERNAL,	/* A SWI gave an error.  */
+  abort_ERROR_UNHANDLED		/* No handler was able to handle the abort.  */
 } abort_error;
 
 typedef struct abort_block

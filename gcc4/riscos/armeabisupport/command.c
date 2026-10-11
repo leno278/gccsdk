@@ -1,6 +1,6 @@
 /* command.c
  *
- * Copyright 2018-2021 GCCSDK Developers
+ * Copyright 2018-2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -12,7 +12,12 @@
 #include "stack.h"
 #include "types.h"
 #include "memory.h"
-#include "shm.h"
+#include "fdtable.h"
+#include "filetable.h"
+#include "shmtable.h"
+#include "ipctable.h"
+#include "lock.h"
+#include "mmap.h"
 #include "debug.h"
 
 static void
@@ -23,7 +28,9 @@ command_info(void)
        app;
        app = linklist_next_app_object (app))
     {
-      printf("App %X\n", app->ID);
+      printf("App (%s) %X\n", app->name, app->ID);
+
+      fdtable_print(app);
 
       allocator_dump_all(&app->allocator_list);
 
@@ -39,11 +46,17 @@ command_info(void)
   printf("Global allocators:\n");
   allocator_dump_all(&global.allocator_list);
 
-  printf("mmaps:\n");
-  allocator_dump_all(&global.mmap_allocator_pool);
+  printf("FILE TABLES:\n");
+  openfiletable_print();
+  systemfiletable_print();
 
-  printf("SHM:\n");
-  shm_dump_object_list();
+  printf("SHM TABLES:\n");
+  openshmtable_print();
+  systemshmtable_print();
+
+  printf("IPC TABLES:\n");
+  openipctable_print();
+  systemipctable_print();
 }
 
 _kernel_oserror *
@@ -56,6 +69,18 @@ module_command (const char *arg_string, int argc, int number, void *pw)
     case CMD_ARMEABISupport_Info:
       command_info ();
       break;
+    case CMD_ARMEABISupport_lslocks:
+      filelocklist_lslocks ();
+      break;
+    case CMD_ARMEABISupport_mmap_report:
+      {
+	int arg = -1;
+	if (argc == 1)
+	  arg = atoi(arg_string);
+
+	mmap_allocator_pool_report(arg);
+	break;
+      }
     }
 
   return err;

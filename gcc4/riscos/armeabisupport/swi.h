@@ -2,7 +2,7 @@
  *
  * Inline assembler versions and declarations of some common SWIs.
  *
- * Copyright 2019 GCCSDK Developers
+ * Copyright 2019-2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -29,15 +29,16 @@
 #define OS_PERMISSION_FLAG_PRIV_WRITE	(1 << 4)
 #define OS_PERMISSION_FLAG_PRIV_READ	(1 << 5)
 
+#define DYNAMICAREA_FLAG_REQUIRES_SPECIFIC_PAGES	(1 << 8)
+#define DYNAMICAREA_FLAG_ABORTABLE			(1 << 16)
+#define DYNAMICAREA_FLAG_IS_PMP				(1 << 20)
+
+#define DYNAMICAREA_ACCESS_COMPLETELY_ABORTABLE		(1 << 9)
+
 #define ARMEABISUPPORT_ABORTOP_REGISTER		0
 #define ARMEABISUPPORT_ABORTOP_DEREGISTER	1
 #define ARMEABISUPPORT_ABORTOP_INSTALL		2
 #define ARMEABISUPPORT_ABORTOP_REMOVE		3
-
-_kernel_oserror *dynamic_area_create (const char *name,
-				      int max_size,
-				      bool needs_mapping,
-				      dynamicarea_block *ret);
 
 #ifndef USE_INLINE_SWIS
 _kernel_oserror *rma_claim (int __size, void **block_ret);

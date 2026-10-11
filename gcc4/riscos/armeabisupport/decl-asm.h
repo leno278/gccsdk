@@ -1,4 +1,4 @@
-@ Copyright (c) 2019-2021 GCCSDK Developers
+@ Copyright (c) 2019-2024 GCCSDK Developers
 @ Written by Lee Noar
 
 #define PAGE_SHIFT	12
@@ -14,6 +14,7 @@
 .set	ABORT_ERROR_STACK_INTERNAL,	3	@ SWI returned error
 .set	ABORT_ERROR_MMAP_AREA,		4	@ Abort in unallocated region
 .set	ABORT_ERROR_MMAP_INTERNAL,	5	@ SWI returned error
+.set	ABORT_ERROR_UNHANDLED,		6
 
 @ Stack abort data block
 					.struct 0
@@ -36,6 +37,9 @@ STACK_ABORT_BLOCK_SIZE:
 .set	PMP_PAGE_KERNEL_CHOICE,		-2
 
 .set	STACK_NAME_MAX_LEN,		32
+
+.set	DYNAMICAREA_HANDLER_REASON_ABORT,	5
+.set	DYNAMICAREA_HANDLER_REASON_SIZE_CHANGE,	6
 
 			.struct	0
 LINKHDR_PREV:		.skip	4

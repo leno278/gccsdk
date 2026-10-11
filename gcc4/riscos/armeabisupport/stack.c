@@ -1,6 +1,6 @@
 /* stack.c
  *
- * Copyright 2019-2021 GCCSDK Developers
+ * Copyright 2019-2026 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -14,7 +14,7 @@
 #include "swi.h"
 #include "types.h"
 
-//#define NO_STACK_ABORT_HANDLER 1
+#define NO_STACK_ABORT_HANDLER 0
 
 static const char *default_stack_name = "<unnamed>";
 static const char *stack_da_name = "UnixLib stacks";
@@ -147,31 +147,31 @@ stack_alloc(unsigned page_count, unsigned num_guard_pages, const char *name,
   unsigned num_pages_required = page_count + num_guard_pages;
   err = allocator_alloc(allocator, num_pages_required, ALLOCATOR_ALLOC_FLAG_ALLOC_ONLY, (eabi_PTR *)&block);
   if (err)
-    return err;
+    return err == armeabisupport_ENOMEM ? armeabisupport_bad_stack : err;
 
-#ifdef NO_STACK_ABORT_HANDLER
+#if NO_STACK_ABORT_HANDLER
   /* Claim/map the whole stack.  */
-  err = allocator_claim_pages(allocator, block + (num_guard_pages << PAGE_SHIFT), page_count);
+  err = dynamicarea_claim_pages(&allocator->da, block + (num_guard_pages << PAGE_SHIFT), page_count);
   if (err)
     goto error__alloced;
 
-  err = allocator_map_pages(allocator, block + (num_guard_pages << PAGE_SHIFT), page_count, PMP_MEM_ACCESS_RWE_RWE);
+  err = dynamicarea_map_pages(&allocator->da, block + (num_guard_pages << PAGE_SHIFT), page_count, PMP_MEM_ACCESS_RWE_RWE);
   if (err)
     goto error__claimed;
 #else
   /* Just claim/map the page at the top of the stack.  */
-  err = allocator_claim_pages(allocator, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
+  err = dynamicarea_claim_pages(&allocator->da, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
   if (err)
     goto error__alloced;
 
-  err = allocator_map_pages(allocator, block + ((num_pages_required - 1) << PAGE_SHIFT), 1, PMP_MEM_ACCESS_RWE_RWE);
+  err = dynamicarea_map_pages(&allocator->da, block + ((num_pages_required - 1) << PAGE_SHIFT), 1, PMP_MEM_ACCESS_RWE_RWE);
   if (err)
     goto error__claimed;
 #endif
 
   app_object *app;
   if ((err = app_find(&app)) != NULL)
-    err = app_new(&app);
+    err = app_new(&app, name);
 
   if (err)
     goto error__mapped;
@@ -201,11 +201,11 @@ stack_alloc(unsigned page_count, unsigned num_guard_pages, const char *name,
   return NULL;
 
 error__mapped:
-  allocator_unmap_pages(allocator, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
+  dynamicarea_unmap_pages(&allocator->da, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
 error__claimed:
-  allocator_release_pages(allocator, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
+  dynamicarea_release_pages(&allocator->da, block + ((num_pages_required - 1) << PAGE_SHIFT), 1);
 error__alloced:
-#ifdef NO_STACK_ABORT_HANDLER
+#if NO_STACK_ABORT_HANDLER
   allocator_free(allocator, block);
 #else
   allocator_free(allocator, block);

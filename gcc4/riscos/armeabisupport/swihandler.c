@@ -1,6 +1,6 @@
 /* som_swihandler.c
  *
- * Copyright 2019-2021 GCCSDK Developers
+ * Copyright 2019-2024 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -11,7 +11,11 @@
 #include "stack.h"
 #include "mmap.h"
 #include "shm.h"
+#include "fileop.h"
+#include "fdop.h"
+#include "ipcop.h"
 #include "main.h"
+#include "types.h"
 
 #define DEBUG_PRINT 1
 #define DEBUG_REPORT 1
@@ -41,6 +45,20 @@ module_swihandler (int number, _kernel_swi_regs * r, void *pw)
       break;
     case ARMEABISupport_ShmOp - ARMEABISupport_00:
       err = shm_op(r);
+      break;
+    case ARMEABISupport_FdOp - ARMEABISupport_00:
+      err = fd_op(r);
+      break;
+    case ARMEABISupport_FileOp - ARMEABISupport_00:
+      err = file_op(r);
+      break;
+    case ARMEABISupport_PreExec - ARMEABISupport_00: {
+      app_object *app;
+      global.parent = ((err = app_find(&app)) == NULL) ? app : NULL;
+      break;
+    }
+    case ARMEABISupport_IPC - ARMEABISupport_00:
+      err = ipc_op(r);
       break;
     default:
       err = error_BAD_SWI;

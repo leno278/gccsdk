@@ -1,6 +1,6 @@
 /* init-fini.c
  *
- * Copyright 2019-2021 GCCSDK Developers
+ * Copyright 2019-2025 GCCSDK Developers
  * Written by Lee Noar
  */
 
@@ -12,8 +12,14 @@
 #include "swi.h"
 #include "abort.h"
 #include "memory.h"
-#define DEBUG_PRINT 0
-#include "debug.h"
+#include "shmtable.h"
+#include "filetable.h"
+#include "ipctable.h"
+#include "opentable.h"
+#include "mmap.h"
+
+#define ENABLE_TRACING 0
+#include "trace.h"
 
 static const char filter_name[] = "ARMEABISupport";
 
@@ -85,6 +91,18 @@ _kernel_oserror *module_initialise (const char *tail, int podule_base, void *pw)
 
   memset (&global, 0, sizeof (armeabisupport_globals));
 
+  static const int systemtable_entry_size[fd_type_MAX] = {
+    sizeof(systemshmtable_entry),
+    sizeof(systemfiletable_entry),
+    sizeof(systemipctable_entry)
+  };
+
+  for (int i = 0; i < fd_type_MAX; i++)
+    array_ctor(&global.system_table[i], systemtable_entry_size[i]);
+
+  array_ctor(&global.open_table, sizeof(opentable_entry));
+  array_ctor(&global.mmap_allocator_pool, sizeof(mmap_allocator));
+
   // linklist_init_list (&global.app_list);
   // global.flags.no_client_check = false;
 
@@ -105,6 +123,21 @@ _kernel_oserror *module_initialise (const char *tail, int podule_base, void *pw)
 		     OS_PERMISSION_FLAG_PRIV_READ | OS_PERMISSION_FLAG_PRIV_WRITE | OS_PERMISSION_FLAG_PRIV_EXEC |
 		     OS_PERMISSION_FLAG_USER_READ | OS_PERMISSION_FLAG_USER_WRITE | OS_PERMISSION_FLAG_USER_EXEC,
 		     &global.os_memory_prot_none);
+
+  dynamicarea test_da;
+  dynamic_area_create("abort-test", 4096, ALLOCATOR_TYPE_PAGE, &test_da);
+
+  _kernel_swi_regs regs;
+  regs.r[0] = 24;		// Check memory access
+  regs.r[1] = (int)test_da.base;
+  regs.r[2] = (int)test_da.base + test_da.size;
+  _kernel_swi(XOS_Bit | OS_Memory, &regs, &regs);
+  global.aborttrap_enabled = ((regs.r[1] & DYNAMICAREA_ACCESS_COMPLETELY_ABORTABLE) ==
+				    DYNAMICAREA_ACCESS_COMPLETELY_ABORTABLE);
+  dynamic_area_remove(test_da.number);
+
+  TRACE("Dynamic areas support aborttrap = %d", global.aborttrap_enabled);
+
   return NULL;
 
 error:
@@ -121,7 +154,22 @@ _kernel_oserror *module_finalisation (int fatal, int podule_base, void *pw)
     return armeabisupport_in_use;
 #endif
 
+  // Remove the stack allocator.
   allocator_destroy_internal(global.stack_allocator);
+
+  for (int i = 0; i < global.open_table.num_entries; i++)
+    if (array_entry_is_in_use(&global.open_table.entries[i]))
+      {
+	opentable_entry *ot_entry = opentable_get_entry(i);
+	if (ot_entry->type == opentable_type_FILE)
+	  filelocklist_dtor(&ot_entry->file.locks);
+      }
+
+  for (int i = 0; i < fd_type_MAX; i++)
+    array_dtor(&global.system_table[i]);
+
+  mmap_allocator_pool_destroy();
+  array_dtor(&global.open_table);
 
   remove_pre_filter();
   remove_post_filter();

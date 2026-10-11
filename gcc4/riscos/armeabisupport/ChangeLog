@@ -1,3 +1,877 @@
+Sat Oct  3 17:13:58 BST 2026  Lee Noar  <lee.noar@sky.com>
+
+	* mmap.c(mmap_allocator_change_protection): num_pages is unsigned and cannot be less than
+	zero. Just check for zero instead.
+
+Sat Oct  3 17:01:57 BST 2026  Lee Noar  <lee.noar@sky.com>
+
+	* mmap.c(armeabi_get_page_protection): Fix potential NULL dereference. If the page
+	fails to map but doesn't return an OS error, then don't try to dereference the error.
+
+Fri Oct  2 20:48:56 BST 2026  Lee Noar  <lee.noar@sky.com>
+
+	* mmap.c(mmap_allocator_change_protection): Don't overwrite the mmap flags
+	with the OS memory access flags.
+
+Sun Sep 27 12:03:55 BST 2026  Lee Noar  <lee.noar@sky.com>
+
+	* mmap.c(mmap_allocator_move_block): Fix remap to read mapping from the
+	  correct allocator.
+
+Sun Aug 16 2026  Lee Noar  <lee.noar@sky.com>
+
+	* stack.c(stack_alloc): Fix build when NO_STACK_ABORT_HANDLER is not zero.
+
+Sat Jul  4 2026  Lee Noar  <lee.noar@sky.com>
+
+	* debug.h: Check the value of the macro rather than if it's defined.
+
+Thu May 21 13:32:54 BST 2026  Lee Noar  <lee.noar@sky.com>
+
+	* abort.c(abort_op): The OS Abort Trap Handler can not handle Thumb mode,
+	  so install my handler at the same time so when the OS handler passes such
+	  an abort on, my handler has a chance to handle it.
+
+Thu May  7 2026  Lee Noar  <lee.noar@sky.com>
+
+	* map.c(armeabi_get_page_protection): Check that we found an allocator.
+	* memory.c: Don't do the same comparison twice
+	  Move the code that checks the last free block further up to avoid duplication
+	  of the comparison. Also add checks to ensure we don't go passed the maximum
+	  size of the dynamic area.
+
+Sat Nov 29 2025  Lee Noar  <lee.noar@sky.com>
+
+	* armeabisupport.cmhg: Add "Stack error" error.
+	* stack.c(stack_alloc): Return a stack specific error rather than a generic out of memory
+	error.
+
+Sat Nov 15 2025  Lee Noar  <lee.noar@sky.com>
+
+	* map.c(armeabi_get_info): Fix zero pain; Check call to appmmap_get_mapping for NULL return.
+
+Tue Jun  3 16:52:53 BST 2025  Lee Noar  <lee.noar@sky.com>
+
+	* configure.ac: Bump version to 1.08.
+	* shmtable.c(systemshmtable_shm_exists): Fix zeropain: Only call strcmp()
+	  on entries that are in use.
+	* filetable.c(filetable_scan_for_canon_filename): Likewise.
+
+Tue Mar 25 2025  Lee Noar  <lee.noar@sky.com>
+
+	Allow memory allocations greater than 100MB
+	* mmap.{h/c}(mmap_new_allocator): Make static as it's not required outside of this file. Add
+	  a size parameter so that we can specify the size of the dynamic area.
+	  For allocations greater than 100MB, don't bother looking for an existing allocator,
+	  but instead just create a new one of the size requested.
+
+Sun Mar 23 2025  Lee Noar  <lee.noar@sky.com>
+
+	Remove use of virtual method table, improve destruction of IPC and file objects to 
+	prevent memory leaks
+	* opentable.{h/c}(struct opentable_entry): Remove. A virtual method table is perhaps
+	  a bit overkill; revert to using object type and switch statements.
+	  (opentable_deref_mmap): Remove. Having two methods that do the same thing, but with
+	  different parameter type (the other being opentable_deref_entry), is confusing and
+	  error prone. Make it so we we only need opentable_deref_entry.
+	  (opentable_log): Use switch instead of virtual method table.
+	* filetable.{h/c}: Remove usage of virtual method table.
+	  (systemfiletable_deref_entry): Change parameter to open table pointer so that we
+	  have access to the file mapping if there is one and can then release the memory.
+	  (systemfiletable_deref_file): Remove in favour of using systemfiletable_deref_file
+	  instead.
+	  (opentable_log_file_entry): Change visibility from static to extern.
+	  (struct openfiletable): Add a mapping so that if the file is mmapped, we know where
+	  and can release the memory in future.
+	* shmtable.{h/c}(systemshmtable_deref_shm): Remove in favour of using systemshmtable_deref_entry
+	  instead.
+	  Remove usage of virtual method table.
+	  (opentable_log_shm_entry): Change visibility from static to extern.
+	* ipctable.{h/c}(struct systemipctable_entry): Add members to store the address and size
+	  of the mmapped shared object. When destroying the IPC object, we have to munmap the memory
+	  to ensure all the correct house keeping is performed, e.g., reference counting, etc.
+	  Remove usage of virtual method table.
+	  (opentable_add_ipc): Record buffer start and size.
+	  (systemipctable_deref_ipc): Use munmap rather than opentable_deref_entry to ensure that
+	  everything is kept in sync (e.g., the application specific mapping).
+	  (opentable_unmap_ipc): Remove in favour of using systemipctable_deref_ipc instead.
+	  (systemipctable_mmap): New method to ensure that when an IPC FD is passed to this app,
+	  either at process start up or via IPC itself (see ipcop_read_fds), that the buffer is
+	  is made known to this app by mmapping it in.
+	  (opentable_log_ipc_entry): Change visibility from static to extern.
+	* fdtable.c(fdtable_copy): If we're copying an IPC FD, then map its buffer into this app
+	  so that it's destroyed correctly in future.
+	* ipcop.c(ipcop_read_fds): If we're receiving an IPC FD, then map its buffer into this app
+	  so that it's destroyed correctly in future.
+	* main.c(app_new): Move the initialisation of the mmap_table array to earlier on so that
+	  fdtable_copy can use armeabi_mmap.
+	* mmap.{h/c}(armeabi_mmap): Make sure we NULL the returned address if there's an error.
+	  (map_in_IPC): New method that takes an IPC open table entry and increments the reference
+	  count for the shared memory object and adds the buffer memory to the application mappings.
+	  (armeabi_mmap_internal): Only recognise a file mapping if the offset and size are also a
+	  match.
+	  Check for an IPC object and use map_in_IPC.
+	  If a new file mapping is detected, then record it in the file object.
+	  (armeabi_munmap): Use switch statement instead of virtual method table.
+	  (appmmap_get_mapping_by_opentable_idx): New method to find an app mapping that references
+	  a particular open table entry.
+	  (mmap_allocator_pool_dump): New debug method to display the linked list of memory allocations
+	  with an allocator.
+
+Tue Mar 18 2025  Lee Noar  <lee.noar@sky.com>
+
+	Add a *command to give information on the mmap allocator pool
+	* armeabisupport.cmhg: Add ARMEABISupport_mmap_report as a *command.
+	* command.c(module_command): Handle new *command.
+	* mmap.{h/c}(mmap_allocator_pool_report): New function to print information about mmap
+	  allocator pool.
+
+Tue Mar 18 2025  Lee Noar  <lee.noar@sky.com>
+
+	Clean up the mmap allocator pool, releasing all memory and removing dynamic areas,
+	when the module exits.
+	* mmap.{h/c}(mmap_allocator_pool_destroy): New function to clean up the mmap allocator pool.
+	* init-fini.c(module_finalisation): Call new function to clean up mmap allocator pool on module exit.
+
+Thu Mar 13 2025  Lee Noar  <lee.noar@sky.com>
+
+	* mmap.c: Remove one debug and make appmmap_list_mappings() output constant rather
+	than dependant on ENABLE_LOGGING.
+	* log.h: Remove COMMAND_PRINTF macros; better to have seperate functions instead.
+	* configure.ac: Bump version to V1.07.
+
+Wed Mar 12 2025  Lee Noar  <lee.noar@sky.com>
+
+	Fix to allow mmap to be used with normal Unixlib FDs
+	* mmap.c(armeabi_mmap): Don't return a EBADF error for an FD we don't recognise as it may be
+	  a normal Unixlib one.
+
+Tue Mar 11 2025  Lee Noar  <lee.noar@sky.com>
+
+	When unmapping a file, only write back the number of bytes original read and not the mapping length
+	* map.h(struct mmap_mapping): Add size member to record the number of bytes actually read.
+	* map.c(armeabi_mmap_internal): Record the number of bytes read if a file.
+	* filetable.c(opentable_unmap_file): Only write out the number of bytes original read
+	  rather than the mapping size.
+
+Tue Mar 11 2025  Lee Noar  <lee.noar@sky.com>
+
+	Move FD from mmap_mapping to app_mmap_mapping
+	It doesn't make sense to record the FD of a mapping in mmap_mapping as
+	that is a global object and FD is specific to each app_object. A better
+	option is to have FD in app_mapp_mapping which is also specific to each
+	app_object.
+
+	* map.{h/c}: Move FD member from mmap_mapping to app_mmap_mmapping.
+	  (armeabi_mmap_internal): Move the initial fd_entry finding code out to
+	  armeabi_mmap and pass the open table index to armeabi_mmap_internal instead
+	  of the FD.
+	  Factor out the code that allocates memory from the mmap pool into a new
+	  function mmap_pool_allocate_memory.
+	  Increment the reference count for a file.
+	  (armeabi_munmap): Don't destroy the empty dynamic area, this is already done
+	  by mmap_allocator_munmap_block.
+	  (armeabi_get_info): Get the FD from the app_mmap_mapping.
+	  (mmap_allocator_move_block): Follow changes to armeabi_mmap_internal.
+	  (mmap_cleanup_app): Re-instate abort handler deregistration.
+	  (appmmap_add_mapping): Initialise FD to default.
+	* opentable.h(opentable_add_file): Move declaration to filetable.h.
+	  (opentable_add_shm): Move declaration to shmtable.h.
+	  (opentable_add_ipc): Move declaration to ipctable.h.
+	  (opentable_deref_mmap): New function declaration.
+	* opentable.c(opentable_deref_mmap): New function similar to opentable_deref_entry
+	  but operates on a specific mmap mapping.
+	* shmtable.{h/c}(opentable_add_shm): Move system table entry creation from fdtable_open_shm
+	  to here.
+	  (systemshmtable_deref_shm): New function similar to systemshmtable_deref_entry, but
+	  takes a specific mapping instead of an system table index.
+	  (opentable_unmap_shm): Use opentable_deref_mmap instead of opentable_deref_entry.
+	* filetable.{h/c}(systemfiletable_deref_entry): Slightly more descriptive parameter name.
+	  (systemfiletable_deref_file): New function similar to systemfiletable_deref_entry, but
+	  takes a specific mapping instead of an system table index. This version also correctly
+	  releases the memory when appropriate; systemfiletable_deref_entry does not have knowledge
+	  of the memory allocation in order to be able to free it.
+	  (opentable_unmap_file): Use opentable_deref_mmap instead of opentable_deref_entry.
+	* ipctable.{h/c}(systemipctable_open_ipc): Use a shared memory object in order to better track
+	  the buffer memory and correctly dereference and release it.
+	  (systemipctable_deref_ipc): Dereference the buffer memory rather than releasing it
+	  immediately to prevent use after free errors.
+	* fdtable.c(fdtable_ftruncate): Fix logging, FD is a pointer not an int.
+	  (fdtable_open_ipc): Follow change to struct systemipctable_entry, the buffer memory is now
+	  represented by a shared memory object rather than a direct mmap mapping.
+	  (fdtable_open_shm): Move system table entry creation to fdtable_open_shm.
+
+Tue Mar 11 2025  Lee Noar  <lee.noar@sky.com>
+
+	* main.c, mmap-asm.s: Temporary abort handler for mmap that just reports the location.
+
+Thu Mar  6 2025  Lee Noar  <lee.noar@sky.com>
+
+	Split mmap allocator off into its own type and each app maintains an array of its own mmap mappings
+	* types.h(struct app_object): Add an array object to manage mmap mappings.
+	  (mmap_allocator_pool): Change from a list into an array.
+	* memory.{h/c}: Move mmap releated code to...
+	* mmap.{h/c}: ...here. Add mmap_allocator type. Add types and functions to manage mappings
+	  within the allocator and within app_object.
+	  mmap_allocators are managed within an array rather than a linked list.
+	* filetable.{h/c}: Use new mmap_allocator. Improve layout of logging/printing of tables.
+	* shmtable.{h/c}: Use new mmap_allocator. Improve layout of logging/printing of tables.
+	  Use allocator/mapping array indices rather than pointers where possible.
+	* opentable.{h/c}: Use new mmap_allocator. Improve logging.
+	* init-fini.c(module_initialise): Construct mmap_allocator_pool array.
+	  (module_finalisation): Destroy mmap_allocator_pool. Move removal of mmap allocations
+	  to mmap_cleanup_app.
+	* main.c(app_new): Construct mmap_table array.
+	  (log_printf): Print the app name if available.
+	* command.c(command_info): mmap mapping are no longer global.
+	* fdtable.c(fdtable_open_ipc): systemipctable_entry now uses indices to represent allocator and
+	  mapping.
+	  (fdtable_open_shm): openshmtbl_idx -> opentable_idx.
+	  Improve logging.
+	* ipctable.{h/c}: systemipctable_entry now uses indices to represent allocator and mapping.
+
+Thu Mar  6 2025  Lee Noar  <lee.noar@sky.com>
+
+	Move dynamic area SWI code from swi.c to dynamicarea.c
+	* dynamicarea.c: Move code from swi.c to here.
+	* swi.c: Delete. No longer required.
+	* Makefile.am: Add dynamicarea.{h/c}, remove swi.c.
+
+Thu Mar  6 2025  Lee Noar  <lee.noar@sky.com>
+
+	* array.c(array_alloc_entry): Zero the memory of the returned allocated entry.
+	  (array_free): Ensure all member variables are reset to defaults.
+	* dynamicarea.h: Make dynamic area number signed so that we can use -1 to represent not valid.
+
+	Fix reference counting of shared memory
+	* ipcop.c(ipcop_read_fds): Don't increment the reference count for FDs received.
+	The reference count is incremented when the FDs are sent to indicate that
+	the receiver has 'opened' this object, but doing it again here has no meaning
+	and leaves a dangling reference.
+
+Sun Feb 16 2025  Lee Noar  <lee.noar@sky.com>
+
+	Rename and move dynamicarea_block to its own files
+	* dynamicarea.{h/c}: New files to implement struct dynamicarea (renamed from
+	  dynamicarea_block and moved from types.h).
+	* types.h(dynamicarea_block): Rename dynamicarea and move to dynamicarea.h.
+	* memory.{h/c}: Move all dyanmic area related page manipulation functions
+	  to new dynamicarea files.
+	  Follow changes: dynamicarea_block->dynamicarea.
+	* init-fini.c: Follow changes: dynamicarea_block->dynamicarea.
+	* stack.c: Follow changes to functions names.
+	* swi.h(dynamic_area_create): Move to dynamicarea.h.
+	* swi.c: Follow changes: dynamicarea_block->dynamicarea.
+	* mmap.c: Follow changes to functions names.
+	* Makefile.am: Add new files.
+
+Sun Feb 16 2025  Lee Noar  <lee.noar@sky.com>
+
+	Make functions that deal with the mapping of pages non reliant on an allocator structure
+	(allocator_claim_pages, allocator_release_pages, allocator_map_pages, allocator_unmap_pages):
+	These functions are not specific to the allocator struct, so change them to take
+	a dynamicarea_block pointer instead. This is so they can be used in an upcoming
+	re-write of the mmap allocator which may be split off into its own structure.
+	Follow this change through out the code base.
+
+Thu Feb 13 2025  Lee Noar  <lee.noar@sky.com>
+
+	Fix bug that caused debug output to stop if app was removed from the active list
+	* main.c(reporter_printf): Don't just return doing nothing if the app isn't in the active list,
+	  omit the app name instead but report everything else.
+	  Fixes problem during app termination where debug info stopped.
+	  (armeabi_cleanup): Leave unlinking the app from the active list until the last minute.
+
+Fri Feb  8 2025  Lee Noar  <lee.noar@sky.com>
+
+	* filetable.c, ipctable.c, shmtable.c: Fix LOG statements that reference a now
+	non-existent base member.
+
+Fri Feb  8 2025  Lee Noar  <lee.noar@sky.com>
+
+	Simplify struct armeabisupport_allocator by observing that the block list
+	is the only addition to the base object in the derived structs and merging that
+	into the base object and removing the derived structs.
+
+	* types.h: Move struct armeabisupport_allocator and struct virtual_function_table
+	  to memory.h and remove derived structure definitions.
+	* memory.{h/c}: struct armeabisupport_allocator and struct virtual_function_table
+	  moved to here from types.h.
+	  Add enum _allocator_type and alter types values to start at 0 so that they can be
+	  used to index an array.
+	  Follow change of removing derived structures by changing occurrences to plain
+	  struct armeabisupport_allocator.
+	  (struct _virtual_function_table): Remove size method as the structure is of constant
+	  size now.
+	  (page_allocator_valid): Improve validity checks.
+	  (allocator_new_internal): Use an array to initialise the virtual table pointer.
+	* fdtable.c: Follow changes to struct armeabisupport_allocator.
+	* filetable.{h/c}: Likewise.
+	* ipctable.{h/c}: Likewise.
+	* shmtable.{h/c}: Likewise.
+	* opentable.h: Likewise.
+	* mmap.{h/c}: Likwise.
+	* armeabi-support.h: Rearrange allocator type values slightly.
+
+Thu Feb  7 2025  Lee Noar  <lee.noar@sky.com>
+
+	Merge all open tables into one open table, pass around opentable_idx instead of fd internally
+	* types.h(struct armeabisupport_globals::open_table): Change from an array of arrays to
+	  a single array.
+	  (typedef struct mmap_block): Add an opentable_idx member.
+	* opentable.{h/c}: New file to implement a general open table for files, shared memory and
+	  IPC objects rather than having seperate tables for each.
+	* filetable.{h/c}(struct _openfiletable_entry): Rename to struct _openfiletable and remove
+	  table_base member in order to allow it to be included within the base object within a union.
+	  (openfiletable_deref_entry): Remove; struct opentable will now do the derefing.
+	  (openfiletable_add_entry): Rename to opentable_add_file and follow changes to open tables.
+	* shmtable.{h/c}(struct _openshmtable_entry): Rename to struct _openshmtable and remove
+	  table_base member in order to allow it to be included within the base object within a union.
+	  (openshmtable_deref_entry): Remove; struct opentable will now do the derefing.
+	  (systemshmtable_open_shm): Move the oflag checks to here from fdtable_open_shm so that
+	  we only have to call systemshmtable_shm_exists() once.
+	  (openshmtable_add_entry): Rename to opentable_add_shm and follow changes to open tables.
+	  (opentable_unmap_shm): Add virtual method to be called when derefed.
+	* ipctable.{h/c}(struct _openipctable_entry): Rename to struct _openipctable and remove
+	  table_base member in order to allow it to be included within the base object within a union.
+	  Move ipc_* static inlines to opentable.h to avoid cyclic dependency.
+	  (openipctable_deref_entry): Remove; struct opentable will now do the derefing.
+	  (openipctable_add_entry): Rename opentable_add_ipc and follow changes to open tables.
+	* armeabisupport.cmhg(armeabisupport_EIO): Add.
+	* Makefile.am: Add new files.
+	* fdop.c(fd_op::FDOP_VALIDATE): fdtable_entry no longer stores the FD type, need to look at
+	  the open table entry instead.
+	* fdtable.{h/c}(struct _fdtable_entry): Remove type member. The type is now determined by the
+	  open table entry.
+	  Follow changes to open tables throughout.
+	* init-fini.c: Follow changes to open tables throughout.
+	* ipcop.c: Follow changes to open tables and FD type thoughout.
+	* ipcop.c: Follow changes to open tables throughout.
+	* main.c(app_remove_by_handle): Inline code into armeabi_cleanup.
+	* mmap.{h/c}: Add msync implementation.
+	  Follow changes to open tables and FD type.
+	* memory.c: Follow changes to open tables and FD type.
+
+Thu Feb  7 2025  Lee Noar  <lee.noar@sky.com>
+
+	* array.h(array_get_entry_ptr): Check the index is within the upper limit of the array.
+
+Thu Jan 24 2025  Lee Noar  <lee.noar@sky.com>
+
+	Improve logging
+	* fdtable.{h/c}(fdtable_log): Add function to log the FD table to Reporter.
+	  Improve logging throughout.
+	* ipctable.{h/c}(openipctable_print,systemipctable_print,openipctable_log,systemipctable_log):
+	  Add functions to log/print the tables.
+	  (openipctable_deref_entry, systemipctable_deref_ipc): Add functions to dereference a table
+	  entry.
+	* filetable.{h/c}(systemfiletable_close_file): Rename to systemfiletable_deref_entry.
+	  Improve logging. Create seperate functions for logging the tables to Reporter and printing them
+	  to the command line.
+	* shmtable.{h/c}: Improve logging. Create seperate functions for logging the tables to Reporter
+	  and printing them to the command line.
+	* mmap.c: Improve logging.
+	* main.c(app_new): Log FD table to Reporter.
+	* command.c: Print app name. Print all tables to command line.
+	* memory.c: Improve logging.
+
+Thu Jan 24 2025  Lee Noar  <lee.noar@sky.com>
+
+	IPC: Fix bug in read ready detection
+	* ipcop_status: Testing if the read position is less than the write position doesn't
+	  work when the write position returns to the beginning of the buffer.
+	  Improve validity tests and logging throughout.
+
+Thu Jan  9 2025  Lee Noar  <lee.noar@sky.com>
+
+	Fix ref counting when copying an FD table during child process initialisation
+	* fdtable.{h/c}(fdtable_open_file): Set the close-on-exec flag if
+	  O_CLOEXEC was set in flags.
+	  (fdtable_lseek): Log offset overflow for SEEK_CUR.
+	  (fdtable_copy): New method to copy an FD table and increment the
+	  ref counts of any open table entries in use. Fixes ref count imbalance
+	  due to FDs being closed on exec due to ref counts being decremented but
+	  did not previously have the ref counts incremented.
+	* main.c(app_new): Use fdtable_copy instead of array_copy.
+
+Tue Jan  7 2025  Lee Noar  <lee.noar@sky.com>
+
+	Add IPC FD type
+	* table_entry_base.h: Define base type for reference counted tables.
+	* types.h(enum fd_type): Move to here from fdtable.h and use enum naming
+	  convention.
+	  (struct app_object): Add name member as a debugging aid.
+	  (struct armeabisupport_globals): Use an array for the open/system tables.
+	* main.{h/c}(app_new): Add name parameter which can be NULL.
+	  fdtable_close_on_exec() should be called for the current app, not the parent.
+	* abort.c: Follow change to app_new().
+	* stack.c: Likewise.
+	* memory.c(allocator_new): Follow change to app_new().
+	  (allocator_munmap): Open/system tables are now in arrays.
+	* init-fini.c: Likewise
+	* lock.c: Likewise.
+	* mmap.c(armeabi_mmap): We should increment the reference on the open table rather
+	  than the system table.
+	* filetable.{h/c}(struct openfiletable_entry, struct systemfiletable_entry): Use
+	  table_entry_base type instead of seperate ref count.
+	  Open/system tables are now in arrays.
+	* shmtable.{h/c}(struct openshmtable_entry, struct systemshmtable_entry): Likewise.
+	* ipcop.{h/c}: New files to implement IPC FD type.
+	* ipctable.{h/c}: Likewise.
+	* Makefile.am: Add new files to build.
+	* armeabisupport.cmhg: Add new IPC SWI.
+	* swihandler.c: Handle new SWI.
+	* fdop.c: fd_type_invalid -> fd_type_INVALID.
+	* fdtable.{h/c}(fdtable_open_ipc): New method to open IPC channel.
+	  Open/system tables are now in arrays.
+	  (fdtable_alloc_entry): New method for common action.
+
+Wed Dec 18 2024  Lee Noar  <lee.noar@sky.com>
+
+	* filetable.c: Use COMMAND_PRINTF macro so that logging redirects to Reporter.
+
+Wed Dec 18 2024  Lee Noar  <lee.noar@sky.com>
+
+	* shm.c: Fix comment by removing API infomation on code that was moved elsewhere.
+
+Wed Dec 18 2024  Lee Noar  <lee.noar@sky.com>
+
+	* shmtable.c: Fix debug statements.
+
+Wed Dec 18 2024  Lee Noar  <lee.noar@sky.com>
+
+	Add support for close-on-exec flag
+	* fdop.c: Add support for fcntl(GETFD,SETFD).
+	  Fix debug statements.
+	* fdtable.{h/c}(struct _fdtable_entry): Add close_on_exec flag.
+	  (fdtable_close_on_exec): New method to close any FDs that have the close_on_exec
+	  flag set.
+	  Fix debug statements.
+	  (fdtable_print): Make direction of output dependant on whether logging or not.
+	* main.c: When the app starts, close any FDs in the parent that had the close_on_exec
+	  flag set.
+
+Wed Dec 18 2024  Lee Noar  <lee.noar@sky.com>
+	Fix 2 bugs in changes to array_alloc intended to support dup2
+	* Only check if include_idx_N is already included in the array if it is
+	  supplied by the caller, ie., greater than 0.
+	* memset_clear_start: Dont use the base type of new_table in the calculation.
+
+Wed Dec 18 2024  Lee Noar  <lee.noar@sky.com>
+	Change SWI name SetAsParent to PreExec
+	* armeabisupport.cmhg: SetAsParent -> PreExec. Slightly less specific in case in the
+	  future we need to do other things in this SWI besides set the parent.
+	* swihandler.c: Follow change above, also ensure parent is set to NULL on error.
+
+Wed Dec 18 2024  Lee Noar  <lee.noar@sky.com>
+	* log.h: (COMMAND_PRINTF): New macro that directs output to Reporter or stdout
+	depending on whether logging is enabled.
+
+Wed Dec 11 2024  Lee Noar  <lee.noar@sky.com>
+
+	Add dup2 support
+	* array.{h/c}(array_alloc): Add extra argument which can be used to request
+	  a particular index is present in the array.
+	* fdtable.{h/c): Add dup2 implementation.
+	* fdop.c: Handle dup2 reason code.
+
+	* shmtable.c: Update comment.
+
+Sun Dec  8 2024  Lee Noar  <lee.noar@sky.com>
+
+	Move shared memory management over from filedesc to fdtable
+	* array.{h/c}(array_copy): New method.
+	  Use ARRAY_INVALID_INDEX instead of magic number -1.
+	* filedesc.c renamed as fdop.c.
+	* filedesc.h renamed as fdop.h.
+	* fileop.c: Move all FD related reason codes (only FILEOP_OPEN remains)
+	  to...
+	* fdop.{h/c): ...here. Remove old filedesc related code.
+	* fdtable.{h/c}(fdtable_entry): Add type member.
+	  (fdtable_open_file): Record the type of the FD.
+	  (fdtable_close_file): Rename fdtable_close as it can be applied to
+	  shared memory as well. Instead of an integer FD, we pass in a pointer
+	  to fdtable_entry. Call correct close method based on the type
+	  of the FD.
+	  (fdtable_lseek): Pass pointer to fdtable_entry instead of integer FD. Only
+	  operate of files (not shared memory).
+	  (fdtable_read): Likewise.
+	  (fdtable_write): Likewise.
+	  (fdtable_get_info): Likewise.
+	  (fdtable_get_lock): Likewise.
+	  (fdtable_set_lock): Likewise.
+	  (fdtable_fsync): Likewise.
+	  (fdtable_ftruncate): Pass pointer to fdtable_entry instead of integer FD.
+	  Operation is dependent on type of FD.
+	  (fdtable_open_shm): New method to open a shared memory FD. This replaces
+	  shm_open that has now been removed from shm.c.
+	  (fdtable_dup): New implementation that handles both files and shm.
+	  (fdtable_destroy): Handle files and shm.
+	  (fdtable_print): Likewise.
+	* filetable.c(openfiletable_deref_entry): Return any error correctly.
+	  Use ARRAY_INVALID_INDEX instead of -1 magic number.
+	* shm.{h/c}: Remove reason codes now handled by fdtable.
+	  (shm_op:SHMOP_OPEN): Now handled by fdtable_open_shm.
+	* types.h(struct armeabisupport_globals): Remove member fd_list; this is now
+	  per app rather than global. Remove now redundant next_fd. Add members
+	  open_shmtable and system_shmtable to implement shared memory objects in a
+	  similar way to shared files. Add parent member to enable the parent of the
+	  current app to be set by a client.
+	* init-fini.c(module_initialise): Remove call to obsolete filedesc_initialise.
+	  Construct new global arrays global.open_shmtable and global.system_shmtable.
+	  (module_finalisation): Destruct new global arrays global.open_shmtable and
+	  global.system_shmtable.
+	* armeabisupport.cmhg: Add new SWI SetAsParent. Used by a client before starting
+	  a new task, so that ARMEABISupport knows to clone the parent's fdtable in
+	  the new client.
+	* swihandler.c: Handle new SWI above.
+	* mmap.c(armeabi_mmap): Use new fdtable to handle FDs passed to mmap.
+	* memory.c(allocator_munmap): Use new fdtable to handle FDs when handling unmapping
+	  a memory block.
+	* command.c(command_info): FDs are now per app rather than global and include both
+	  shared files and shared memory.
+	* main.c(app_new): If the app has a parent, clone its FD table.
+	  (armeabi_cleanup): Remove call to obsolete filedesc_cleanup_app.
+	* shmtable.{h/c}: New files. Implements the open and system tables for shared memory
+	  management in a similar way to the shared files.
+	* Makefile.am: Add new files.
+
+Thu Dec  5 2024  Lee Noar  <lee.noar@sky.com>
+
+	Improve error handling in fdtable_open_file
+	* array.h(ARRAY_INVALID_INDEX): New symbol to represent an invalid array index.
+	* fdtable.c(canonicalise_filename): Improve error handling; return error pointer
+	  and with result returned in argument.
+	  (fdtable_open_file): Follow change to canonicalise_filename and clean up
+	  array entries on error.
+
+Wed Dec  4 2024  Lee Noar  <lee.noar@sky.com>
+
+	Change array_alloc_entry to return an error and the result in an argument
+	* array.{h/c}(array_alloc_entry): Return an error pointer instead of the result;
+	  return the result in an argument pointer.
+	* fdtable.c(fdtable_open_file): Replace section of code with call to
+	  array_alloc_entry and deal with any returned errors.
+	* filetable.c(systemfiletable_add_entry): Change code so that there is only one
+	  point of return.
+	  Replace section of code with call to array_alloc_entry and deal with any
+	  returned errors.
+	  (openfiletable_add_entry): Replace section of code with call to array_alloc_entry
+	  and deal with any returned errors.
+	* lock.c(alloc_lock): Follow change to array_alloc_entry above.
+
+Thu Nov 28 2024  Lee Noar  <lee.noar@sky.com>
+
+	Shared files: Don't reject fds allocated by fdtable.
+	* mmap.c(armeabi_mmap): Check if the fd is known by the fdtable array.
+	  (mmap_op): Return an error for an unknown reason code.
+	* filedesc.c(fd_op): Return error for unknown reason code.
+	* fdtable.c(fdtable_ftruncate): Add path name to debug trace
+
+Sun Nov 24 2024  Lee Noar  <lee.noar@sky.com>
+
+	* fdtable.{h/c}: Add ftruncate method.
+	* filetable.h: As above.
+	  (systemfiletable_print, openfiletable_print): Use printf for command output
+	  rather than LOG (which I was using for reporter debug output)
+	* init-fini.c: Disable tracing.
+	* fileop.c: Add ftruncate handling.
+
+Sat Nov 23 2024  Lee Noar  <lee.noar@sky.com>
+
+	Shared files: Add advisory locks implementation and fsync method
+	* lock.{h/c}: New files implementing advisory locks.
+	* filetable.{h/c}(struct _openfiletable_entry): Add per file lock list.
+	  Add fsync method and function to return filename from fd.
+	  (openfiletable_add_entry): Initialise lock list for new file.
+	  array_get_entry -> array_get_entry_ptr
+	* init-fini.c(module_finalisation): Destroy all file lock lists on module exit.
+	* armeabisupport.cmhg: Add command to list all file locks.
+	* command.c: Handle new lslocks command.
+	* Makefile.am: Add new file lock.c.
+	* array.{h/c}(array_get_entry): Rename to array_get_entry_ptr.
+	  Add function array_get_entry_idx.
+	  Add convenience funcions array_entry_mark_used and array_entry_mark_unused.
+	  Add function array_alloc_entry to create/extend array and return a free
+	  entry for use.
+	* fdtable.{h/c}(get_fdtable_entry): Make visible outside of this source file and
+	  make the app_object a parameter rather than finding it ourselves. This makes it
+	  less likely that we duplicate effort to get the app_object if the caller supplies
+	  it.
+	  (fdtable_close_file): Clear all locks that this app has for this file as per
+	  IEEE Std 1003.1-1988 (“POSIX.1”).
+	  (fdtable_get_lock,fdtable_set_lock,fdtable_fsync): Add new methods.
+	* fileop.c: Add and handle new reason codes - FILEOP_SETLOCK, FILEOP_GETLOCK,
+	  FILEOP_FSYNC.
+
+Sat Nov 23 2024  Lee Noar  <lee.noar@sky.com>
+
+	* filedesc.c: FDOP_VALIDATE_FD now includes fdtable shared file fds.
+
+Sat Oct 19 2024  Lee Noar  <lee.noar@sky.com>
+
+	* array.h(array_get_entry): Add function to return address of an array element taking
+	into account the stored size of each element.
+	* fdtable.c, filetable.c: Fix bug where array entries are accessed via base type size
+	rather than the actual element size.
+
+Fri Oct 18 2024  Lee Noar  <lee.noar@sky.com>
+
+	* trace.h: Add TRACE_SWI macro.
+	* mmap.c: Use TRACE/LOG macros from trace.h and log.h.
+	* filetable.{h/c}: Add functions to retrieve file info.
+	* fdtable.{h/c}: Likewise.
+	* fileop.c: Add new reason code to FileOp SWI to retrieve file info.
+
+Wed Oct  9 2024  Lee Noar  <lee.noar@sky.com>
+
+	* array.c: Remove line numbers from debug as they're not really of much help.
+	* filetable.c(file_object_type): Use OS_File 17 (no path) instead of OS_File 5.
+	  (osfile_close): Guard against the handle being 0 which would close all files.
+	  (systemfiletable_add_entry): If opening the file did not result in an error
+	  but the handle is still 0, then return an error.
+	  (openfiletable_print): Fix compiler warning by using correct specifier.
+	* fdtable.c(fdtable_close_file): Don't log bad file descriptors as we will see and
+	  reject standard Unixlib descriptors and it can get noisy.
+	  (fdtable_lseek): Fix compiler warning s by using correct string format specifiers.
+	  (fdtable_read,fdtable_write): Slight rewrite to remove error_return labels.
+	  Only produce trace output if it's one of our file descriptors, otherwise it gets too noisy.
+	* array.c(array_alloc): Fix typo in format string.
+
+Sat Oct  5 2024  Lee Noar  <lee.noar@sky.com>
+
+	* fdtable.c:
+	  (fdtable_lseek): Check for negative offset and overflow. Add extra logging.
+	  (fdtable_write): Remove cast when getting file length. Add extra logging.
+
+Sat Oct  5 2024  Lee Noar  <lee.noar@sky.com>
+
+	* armeabisupport.cmhg: Add armeabisupport_EOVERFLOW error.
+	* filetable.{h/cpp}: Change file length/extent parameter types to off_t instead of unsigned.
+
+Fri Oct  4 2024  Lee Noar  <lee.noar@sky.com>
+
+	WIP: Shared files implementation: Add open file table
+	* filetable.{h/c}: Add struct openfiletable_entry with functions for maintaining
+	  an array of such objects.
+	  Rename struct filetable_entry to struct systemfiletable_entry and rename associated
+	  functions to match.
+	  (systemfiletable_add_entry): Fix bug in for loop where array access was via old array pointer
+	  rather than through newly allocated array pointer.
+	* fdtable.{h/c}: Follow name change filetable_entry to systemfiletable_entry.
+	  Use openfile_table to index systemfile_table.
+	  (struct fdtable_entry): Move flags, mode and file_offset member to openfiletable_entry
+	  to support dup() in future.
+	  (fdtable_open_file): Fix bug in for loop where array access was via old array pointer
+	  rather than through newly allocated array pointer.
+	  Add logging and trace.
+	* filedesc.h(fdtype): Move to...
+	* types.h: ...here
+	  (armeabisupport_globals): Rename file_table array to system_filetable and add open_filetable.
+	* main.c(app_new): Follow name change of struct fd_table_entry to fdtable_entry.
+	  (app_remove_by_handle): Destroy the app specific fd table on exit.
+	* init-fini.c(module_initialise): Follow name change of filetable_entry to systemfiletable_entry
+	  and construct global.open_filetable.
+	  (module_finalisation): Follow name change of filetable_entry to systemfiletable_entry
+	  and destroy global.open_filetable.
+	* command.c(command_info): Dump file and fd tables as part of the info command.
+
+Fri Oct  4 2024  Lee Noar  <lee.noar@sky.com>
+
+	* log.h: New header file providing a LOG macro.
+	* trace.h: New header file providing a TRACE macro.
+	* array.{h.c}: Move ARRAY_INIT_NUM_ENTRIES to public header for general use;
+	add trace and logging statements.
+	* debug.h: Remove old TRACE macro, now replaced with one in trace.h.
+
+Mon Sep 23 2024  Lee Noar  <lee.noar@sky.com>
+
+	WIP: Shared files implementation: Add file_op SWI
+	* fileop.{h/c}: Add SWI handler.
+	* swihandler.c: Call SWI handler.
+	* armeabisupport.cmhg: Add FileOp SWI.
+	* Makefile.am: Add new files.
+
+Mon Sep 23 2024  Lee Noar  <lee.noar@sky.com>
+
+	WIP: Shared files implementation: Add some sanity checks
+	* get_fdtable_entry: Make sure the fd index is valid for the size of the array.
+	* fdtable_close_file: Make sure the fd is one that is in use.
+	* fdtable_read: Make sure the fd is readable.
+	* fdtable_write: Make sure the fd is writeable.
+
+Thu Sep 19 2024  Lee Noar  <lee.noar@sky.com>
+
+	* fdtable.{h,c},filetable.{h,c}: Add seek, read and write implementations.
+
+Mon Sep 16 2024  Lee Noar  <lee.noar@sky.com>
+
+	WIP: Shared files implementation: app fdarray construct/destroy.
+	* fd_table.{h/c}(fdtable_open_file): Store the flags and mode within the fd array entry.
+	* main.c(app_new): Construct the fdarray for the app.
+	  (app_remove_by_handle): Destroy fdarray on app exit.
+
+Mon Sep 16 2024  Lee Noar  <lee.noar@sky.com>
+
+	WIP: Shared files implementation: Add fdtable array.
+	* fdtable.{h/c}: A table of fds based off the array type (array.h).
+	* filedesc.h(struct _fd_table_entry): Move to fdtable.h as struct _fdtable_entry.
+	* filetable.c(canonicalise_filename): Move to fdtable.c.
+	  (filetable_add_entry): Copy the filename, rather than taking ownership. This simplifies
+	  the code at the expense of potentially fragmenting memory.
+	  Make use of the in_use flag of struct array_entry_base.
+	  (filetable_open_file): Assume the filename is already canonicalised on entry.
+	  (filetable_close_file): Clear the array entry when the file is closed properly.
+	* Makefile.am: Add new file.
+
+Sun Sep 15 2024  Lee Noar  <lee.noar@sky.com>
+
+	* array.h(struct _array_entry_base): Add in_use flags.
+
+Sat Sep 14 2024  Lee Noar  <lee.noar@sky.com>
+
+	Shared files: Functions return proper error pointers. Open and close files.
+	* array.{h/c}: Change functions to return error pointers rather than integers.
+	* filetable.{h/c}: As above. Also add code to open and close files as appropriate.
+
+Sat Sep 14 2024  Lee Noar  <lee.noar@sky.com>
+
+	WIP: Allow files to be shared between tasks. We do this by following what
+	Linux does; by maintaining a table of files indexed by a table of fds.
+
+	This code is currently untested as there's not enough of it yet for a working system.
+
+	* array.{h/c}: A basic array type.
+	* filetable.{h/c}: New files to implement the file table. This does not yet actually open
+	  or close any files, but merely deals with table creation and adding, removing entries.
+	* types.h(armeabisupport_globals): Add a file table array.
+	  (app_object): Add a fd table array.
+	* init-fini.c(module_initialise): Initialise the file table.
+	  (module_finalisation): Destroy the file table.
+	* filedesc.{h/c}(filedesc_initialise): Change from a static inline in header to extern
+	  function in source file.
+	  (struct _fd_table_entry): Add. Note that this will most likely move to its own source
+	  file in future.
+	  * Makefile.am: Add new files.
+
+Fri Aug 30 2024  Lee Noar  <lee.noar@sky.com>
+
+	* mmap.c(armeabi_mmap): Don't fault fd if we don't recognise it, it could be a
+	  normal file
+
+Thu Mar 28 2024  Lee Noar  <lee.noar@sky.com>
+
+	* mmap-asm.s: Remove debug.
+
+Tue Mar 26 2024  Lee Noar  <lee.noar@sky.com>
+
+	Changes to help improve resource clean up on program exit with some improvements to debug statements
+	* shm.{h/c}(shm_cleanup_app): Remove unused function. Debug improvements.
+	* memory.c(allocator_mmap_cleanup_app): Release the memory pages regardless of
+	  whether it is shared memory. Debug improvements.
+	* main.c(armeabi_cleanup): Move the call to mmap_cleanup_app to after the call
+	  to filedesc_cleanup_app in an effort to improve the clearing up of stray
+	  memory allocations at program exit.
+	* init-fini.c(module_finalisation): Make sure we destroy what's left of the
+	  mmap pool when the module is finalised.
+	* filedesc.{h/c}(filedesc_cleanup_app): Release any unused fds.
+	  Add function to dump out the current list of fds.
+	* command.c(command_info): Dump the list of currently known fds as well.
+
+Fri Mar 1  2024  Lee Noar  <lee.noar@sky.com>
+
+	Change API of SWI "ARMEABISupport_FdOp", FDOP_VALIDATE_FD
+	* filedesc.c(fd_op): Return type of fd in r1 or -1 if invalid.
+
+Wed Feb 28 2024  Lee Noar  <lee.noar@sky.com>
+
+	Add file descriptor implementation for use by shared memory
+	* filedesc.{h/c}: Add SWI handler for SWI "FdOp" along with supporting
+	  functions. Reason codes for this SWI are "VALIDATE_FD" and "CLOSE".
+	* Makefile.am: Add new above source file.
+	* armeabisupport.cmhg: Add new FdOp SWI.
+	* types.h: Use stdbool.h instead of defining own constants.
+	  (armeabisupport_globals): Replace shared memory list with file descriptor
+	  list. Add next_fd member to track last used fd number.
+	  (struct mmap_block): Rename flags member to mmap_flags. Add flag to indicate
+	  if shared memory.
+	* swihandler.c: Add FdOp SWI to SWI handling.
+	* swi.h(dynamic_area_create): Change 3rd arg type of declaration to match
+	  definition.
+	* stack-asm.s: Remove debug.
+	* abort-asm.s: Remove debug. R11 is no longer a pointer to the abort registers.
+	* debug.h: Disable TRACE by default.
+	* abort.{h/c}: Add new reason code to SWI "AbortOp" to return flag indicating if
+	  abortable dynamic areas are in use.
+	* main.c(armeabi_cleanup): Clear up file descriptors rather than shared memory blocks.
+	* init-fini.c(module_initialise): Initialise file descriptor system.
+	* mmap.c: Changes to debug (file descriptors are now small ints rather than addresses
+	  and are better displayed in base 10 rather than hex).
+	  Use the file descriptor system to find shared memory blocks. Originally, the file descriptors
+	  were addresses to shared memory blocks, if the addresses were no longer valid, then they became
+	  difficult to validate. The file descriptors are now small integers similar to Unix fds which
+	  can be used to search for the correct shared memory.
+	* memory.c: As above.
+	* shm.{h/c}: Use the new file descriptor system to access shared memory.
+	  shm_dup() now creates a new fd rather than just returning the old one with an incremented
+	  ref count (the shared memory block ref count is still incremented).
+	* configure.ac: Bump version number to 1.06.
+
+Fri Feb 16 2024  Lee Noar  <lee.noar@sky.com>
+
+	Add experimental support for abortable dynamic areas with debug statements
+	* abort-asm.s: Add code to handle an abort in a dynamic area using
+	  the OS abort trap mechanism.
+	  (da_handler): Call the abort trap handler when necessary. Return a generic
+	  error rather than our own.
+	* abort.c(abort_op): SWIs ABORTOP_INSTALL and ABORTOP_REMOVE are noops
+	  if the OS abort trap mechanism is supported.
+	* swi.c(dynamic_area_create_pmp): Pass the address of the data abort block
+	  for use in the abort handler (in r12).
+	* shm.c(shm_op): Add optional tracing of SWI calls.
+	  (shm_deref_object): Fix reference count. The object would not actually
+	  delete when the ref count reached 0.
+	* mmap-asm.s: Add debug. Remove r11 as a pointer to a register dump.
+	* stack-asm.s: Likewise.
+	* stack.c: Better use of preprocessor to enable/disable abort handler at
+	  build time.
+	* mmap.c(mmap_op): Add optional tracing of SWI calls.
+
+Thu Feb 15 2024  Lee Noar  <lee.noar@sky.com>
+
+	* abort.h, decl-asm.h: Add constants.
+
+Mon Jan 29 2024  Lee Noar  <lee.noar@sky.com>
+
+	* swi.c(dynamic_area_create_non_pmp): Set area number to a known invalid value
+	  on error.
+
+Mon Jan 29 2024  Lee Noar  <lee.noar@sky.com>
+
+	Make the test for abort trap global rather than per dynamic area
+	The test is to determine if the system supports abortable dynamic
+	areas rather than if individual areas can abort, so move the code
+	to module initialisation.
+
+	* types.h(aborttrap_enabled): Move flag from struct dynamicarea_block
+	  to struct armeabisupport_globals.
+	* swi.c: Move defines to the swi.h.
+	  Move abort test code to init-fini.c(module_initialise).
+	  Move TRACE macro to debug.h.
+	* swi.h: Move defines from swi.c to here.
+	* debug.h: Move TRACE macro from swi.c to here.
+	* init-fini.c(module_initialise): Move abort test code to here.
+
+Fri Jan 26 2024  Lee Noar  <lee.noar@sky.com>
+
+	* swi.c(dynamic_area_create): Split into PMP/non PMP versions.
+	* types.h(struct dynamicarea_block): Add new flag to record if this dynamic area
+	supports abort trap.
+
+Thu Jan 25 2024  Lee Noar  <lee.noar@sky.com>
+
+	* memory.h: Define flag to indicate dynamic area uses the abort trap.
+
 Sat Jan  7 16:12:52 GMT 2023  Lee Noar  <lee.noar@sky.com>
 
 	* memory.c(allocator_munmap): Fix zero pain; check that there is a last block

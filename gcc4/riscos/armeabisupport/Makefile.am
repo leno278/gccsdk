@@ -1,9 +1,52 @@
-# Copyright (c) 2019-2021 GCCSDK developers
+# Copyright (c) 2019-2024 GCCSDK developers
 
 bin_PROGRAMS=ARMEABISupport
-ARMEABISupport_SOURCES=link_list.c memory.c swihandler.c init-fini.c \
-			main.c swi.c swi-asm.s command.c abort.c abort-asm.s \
-			stack.c stack-asm.s mmap.c mmap-asm.s shm.c armeabisupport.cmhg
+ARMEABISupport_SOURCES= \
+	dynamicarea.c \
+	dynamicarea.h \
+	link_list.c \
+	link_list.h \
+	memory.c \
+	memory.h \
+	swihandler.c \
+	init-fini.c \
+	main.c \
+	swi.h \
+	swi-asm.s \
+	command.c \
+	abort.c \
+	abort.h \
+	abort-asm.s \
+	stack.c \
+	stack.h \
+	stack-asm.s \
+	mmap.c \
+	mmap.h \
+	mmap-asm.s \
+	shm.c \
+	shm.h \
+	fdop.c \
+	fdop.h \
+	array.c \
+	array.h \
+	filetable.c \
+	filetable.h \
+	shmtable.c \
+	shmtable.h \
+	fdtable.c \
+	fdtable.h \
+	fileop.c \
+	fileop.h \
+	lock.c \
+	lock.h \
+	ipcop.c \
+	ipcop.h \
+	ipctable.c \
+	ipctable.h \
+	opentable.c \
+	opentable.h \
+	armeabisupport.cmhg
+
 include_HEADERS=armeabi-support.h
 BUILT_SOURCES=armeabisupport.h
 ARMEABISupport_CFLAGS=-O3 -mmodule -Wall -std=gnu99

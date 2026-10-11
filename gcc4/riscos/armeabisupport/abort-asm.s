@@ -1,9 +1,12 @@
-@ Copyright (c) 2019-2021 GCCSDK Developers
+@ Copyright (c) 2019-2024 GCCSDK Developers
 @ Written by Lee Noar
 
 #include "decl-asm.h"
 #include "debug-asm.h"
 
+.set	STORE_OP,	0
+.set	LOAD_OP,	1
+.set	MAP_OP,		2
 
 	.text
 
@@ -53,7 +56,6 @@ USR_mode:
 	LDR	r10, [r7, #ABORT_BLOCK_FIRST_HANDLER]
 	TEQ	r10, #0
 	BEQ	handler__pass_on
-	ADR	r11, registers_0
 	MOV	r1, r8					@ address of fault
 0:
 	LDR	r12, [r10, #ABORT_HANDLER_R12_DATA]
@@ -280,13 +282,229 @@ postfilter__exit:
 @ r12 - Workspace pointer passed to OS_DynamicArea 0
 	.global da_handler
 da_handler:
+	CMP	r0, #DYNAMICAREA_HANDLER_REASON_ABORT
+	BEQ	aborttrap_handler
+
+	@ Set V flag.
 	CMP     r0, #1<<31
 	CMNVC   r0, #1<<31
-	ADR	r0, error
+
+	@ Return a generic error rather than returning our own.
+	MOV	r0, #0
 	MOV	pc, lr
-error:
-	.word	0
-	.asciz	"DA handler called"
-	.align
+
+	@ Entry:
+	@  R0	5 (Dynamic Area handler reason)
+	@  R1	AbortTrap reason code + flags
+	@    Bits 0-3: Reason code:
+	@	0 = Store operation. Bit 4 indicates if the access is privileged (1) or unprivileged (0).
+	@	1 = Load operation. Bit 4 indicates if the access is privileged (1) or unprivileged (0).
+	@	2 = Memory map operation. Bits 4-9 indicate the required permissions.
+	@	3+ Reserved
+	@	Bits 4+: Flags
+	@  R2	Pointer to buffer to use as data source (AbortTrap reason 0) or destination (AbortTrap reason 1). Invalid for memmap requests (AbortTrap reason 2).
+	@  R3	Base address of memory being accessed
+	@  R4	Length of memory being accessed (bytes)
+	@  R5	Current end address of allocated portion of dynamic area (invalid for sparse or PMP areas)
+	@  R12	Workspace pointer passed to OS_DynamicArea 0 or base of area
+	@ Exit
+	@  R4	Amount of data processed (= entry R4 if all processed)
+	@  All other registers preserved
+
+aborttrap_handler:
+	STMFD	sp!, {r1-r3, r5-r12, lr}
+
+	MOV	r7, r12
+
+	@ Guard against an abort in this abort handler, as soon as possible at least
+	LDR	r0, [r7, #ABORT_BLOCK_IN_HANDLER]
+	TEQ	r0, #1
+	BEQ	aborttrap_handler__internal_abort
+
+	MOV	r0, #1
+	STR	r0, [r7, #ABORT_BLOCK_IN_HANDLER]
+
+	LDR	r10, [r7, #ABORT_BLOCK_FIRST_HANDLER]
+	TEQ	r10, #0
+	BEQ	aborttrap_handler__unhandled
+
+	MOV	r9, r1				@ r9 = reason code, 0 = store, 1 = load
+	MOV	r1, r3				@ address of fault
+0:
+	LDR	r12, [r10, #ABORT_HANDLER_R12_DATA]
+
+	MOV	lr, pc
+	LDR	pc, [r10, #ABORT_HANDLER_ROUTINE]
+
+	AND	r8, r0, #0xFF
+	TEQ	r8, #ABORT_HANDLER_CLAIM
+	BEQ	aborttrap_handler__exit
+	TEQ	r8, #ABORT_HANDLER_ERROR
+	BEQ	aborttrap_handler__error
+
+	LDR	r10, [r10, #LINKHDR_NEXT]
+	TEQ	r10, #0
+	BNE	0b
+	@ Fall through, no handler was able to handle the abort
+
+aborttrap_handler__unhandled:
+	MOV	r0, #ABORT_ERROR_UNHANDLED
+	STR	r0, [r7, #ABORT_BLOCK_STATUS]
+
+	@ Set V flag.
+	CMP     r0, #1<<31
+	CMNVC   r0, #1<<31
+
+	MOV	r4, #0
+
+	MOV	r0, #0
+	STR	r0, [r7, #ABORT_BLOCK_IN_HANDLER]
+
+	@ Return a generic error rather than returning our own (ie, r0 = 0)
+	LDMFD	sp!, {r1-r3, r5-r12, pc}
+
+aborttrap_handler__internal_abort:
+	MOV	r0, #ABORT_ERROR_IN_ABORT_HANDLER
+	STR	r0, [r7, #ABORT_BLOCK_STATUS]
+
+aborttrap_handler__error:
+	@ Handler error exit:
+	@   V flag set
+	@   r0 = 0 for generic error
+	@   r4 = 0
+	@   Store the returned error in the abort block
+	MOV	r0, r0, LSR#8
+	AND	r0, r0, #0xFF
+	STR	r0, [r7, #ABORT_BLOCK_STATUS]
+
+	@ Set V flag.
+	CMP     r0, #1<<31
+	CMNVC   r0, #1<<31
+
+	@ Return a generic error rather than returning our own.
+	MOV	r0, #0
+	STR	r0, [r7, #ABORT_BLOCK_IN_HANDLER]
+
+	LDMFD	sp!, {r1-r3, r5-r12, pc}
+
+aborttrap_handler__exit:
+	@ Normal exit:
+	@   V flag clear
+	@   Return 0 in r0
+	@   Return r4 as it was on entry
+	TEQ	r9, #STORE_OP
+	BNE	aborttrap_handler__loadop
+
+aborttrap_handler__storeop:
+	TEQ	r4, #1
+	LDREQB	r0, [r2, #0]
+	STREQB	r0, [r3, #0]
+	BEQ	1f
+	TEQ	r4, #2
+	BNE	0f
+	LDRB	r0, [r2, #0]
+	STRB	r0, [r3, #0]
+	LDRB	r0, [r2, #1]
+	STRB	r0, [r3, #1]
+	B	1f
+0:
+	RSB	r1, r4, #(15 * 4)
+	ADD	r1, pc, r1, LSL#1
+	@ Following instruction is required to align start of jump table
+	@ which is why it isn't folded into the one above.
+	MOV	pc, r1
+
+	@ Enough load/stores to emulate a full STMFD with all registers used.
+	LDR	r0, [r2], #4
+	STR	r0, [r3], #4
+	LDR	r0, [r2], #4
+	STR	r0, [r3], #4
+	LDR	r0, [r2], #4
+	STR	r0, [r3], #4
+	LDR	r0, [r2], #4
+	STR	r0, [r3], #4
+	LDR	r0, [r2], #4
+	STR	r0, [r3], #4
+	LDR	r0, [r2], #4
+	STR	r0, [r3], #4
+	LDR	r0, [r2], #4
+	STR	r0, [r3], #4
+	LDR	r0, [r2], #4
+	STR	r0, [r3], #4
+	LDR	r0, [r2], #4
+	STR	r0, [r3], #4
+	LDR	r0, [r2], #4
+	STR	r0, [r3], #4
+	LDR	r0, [r2], #4
+	STR	r0, [r3], #4
+	LDR	r0, [r2], #4
+	STR	r0, [r3], #4
+	LDR	r0, [r2], #4
+	STR	r0, [r3], #4
+	LDR	r0, [r2], #4
+	STR	r0, [r3], #4
+	LDR	r0, [r2], #4
+	STR	r0, [r3], #4
+1:
+	@ Return value of 0 in r0 and clear V flag
+	MOVS	r0, #ABORT_ERROR_NONE
+
+	@ Clear error indicator
+	STR	r0, [r7, #ABORT_BLOCK_STATUS]
+
+	@ Clear in handler flag
+	STR	r0, [r7, #ABORT_BLOCK_IN_HANDLER]
+
+	@ r4 preserved from entry
+	LDMFD	sp!, {r1-r3, r5-r12, pc}
+
+aborttrap_handler__loadop:
+	TEQ	r9, #MAP_OP
+	MOVEQ	r0, #(ABORT_ERROR_UNHANDLED << 8)
+	STREQ	r0, [r7, #ABORT_BLOCK_STATUS]
+	BEQ	aborttrap_handler__error
+
+	MOV	r0, #0
+	TEQ	r4, #1
+	STREQB	r0, [r2, #0]
+	BEQ	0f
+	TEQ	r4, #2
+	STREQB	r0, [r2, #0]
+	STREQB	r0, [r2, #1]
+	BEQ	0f
+
+	RSB	r1, r4, #(15 * 4)
+	ADD	r1, pc, r1
+	@ Following instruction is required to align start of jump table
+	@ which is why it isn't folded into the one above.
+	MOV	pc, r1
+
+	STR	r0, [r2], #4
+	STR	r0, [r2], #4
+	STR	r0, [r2], #4
+	STR	r0, [r2], #4
+	STR	r0, [r2], #4
+	STR	r0, [r2], #4
+	STR	r0, [r2], #4
+	STR	r0, [r2], #4
+	STR	r0, [r2], #4
+	STR	r0, [r2], #4
+	STR	r0, [r2], #4
+	STR	r0, [r2], #4
+	STR	r0, [r2], #4
+	STR	r0, [r2], #4
+	STR	r0, [r2], #4
+0:
+	@ Return value of 0 in r0 and clear V flag
+	MOVS	r0, #ABORT_ERROR_NONE
+
+	@ Clear error indicator
+	STR	r0, [r7, #ABORT_BLOCK_STATUS]
+
+	@ Clear in handler flag
+	STR	r0, [r7, #ABORT_BLOCK_IN_HANDLER]
+
+	@ r4 preserved from entry
+	LDMFD	sp!, {r1-r3, r5-r12, pc}
 
 	.end

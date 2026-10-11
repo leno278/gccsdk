@@ -1,4 +1,4 @@
-@ Copyright (c) 2019-2021 GCCSDK Developers
+@ Copyright (c) 2019-2024 GCCSDK Developers
 @ Written by Lee Noar
 
 #include "decl-asm.h"
@@ -8,7 +8,6 @@
 
 @ Entry:
 @  r1 = address of fault
-@  r11 = ptr to register block (r0-r15, cpu flags)
 @  r12 = ptr to user data block
 @		stack_abort_data_object
 @		+0 - ptr to app stack list
@@ -20,7 +19,7 @@
 @  r12 can be corrupted
 @  All other registers preserved
 stack_abort_handler:
-	STMFD	sp!, {r1-r8, r10-r11, lr}
+	STMFD	sp!, {r1-r8, r10, lr}
 
 	LDR	r10, [r12, #STACK_ABORT_BLOCK_STACK_LIST]
 	LDR	r10, [r10, #LINKLIST_FIRST]
@@ -28,7 +27,7 @@ stack_abort_handler:
 0:
 	TEQ	r10, #0
 	MOVEQ	r0, #ABORT_HANDLER_PASS_ON
-	LDMEQFD	sp!, {r1-r8, r10-r11, pc}
+	LDMEQFD	sp!, {r1-r8, r10, pc}
 
 	LDR	r2, [r10, #STACK_BASE]
 	LDR	r3, [r10, #STACK_TOP]
@@ -79,18 +78,18 @@ stack_abort_handler:
 
 stackabort_claim:
 	MOV	r0, #ABORT_HANDLER_CLAIM
-	LDMFD	sp!, {r1-r8, r10-r11, pc}
+	LDMFD	sp!, {r1-r8, r10, pc}
 stackabort_pass_on:
 	MOV	r0, #ABORT_HANDLER_PASS_ON
-	LDMFD	sp!, {r1-r8, r10-r11, pc}
+	LDMFD	sp!, {r1-r8, r10, pc}
 stackabort_overflow:
 	MOV	r0, #ABORT_HANDLER_ERROR
 	ORR	r0, r0, #(ABORT_ERROR_STACK_OVERFLOW << 8)
-	LDMFD	sp!, {r1-r8, r10-r11, pc}
+	LDMFD	sp!, {r1-r8, r10, pc}
 stackabort_swi_error:
 	MOV	r0, #ABORT_HANDLER_ERROR
 	ORR	r0, r0, #(ABORT_ERROR_STACK_INTERNAL << 8)
-	LDMFD	sp!, {r1-r8, r10-r11, pc}
+	LDMFD	sp!, {r1-r8, r10, pc}
 
 	.global	get_stack_abort_handler
 get_stack_abort_handler:

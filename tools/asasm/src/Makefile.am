@@ -1,14 +1,17 @@
 bin_PROGRAMS=asasm
 
+GIT_REV := $(shell git describe 2>/dev/null | cat)
+GIT_BUILD_REV := $(shell git rev-list 2>/dev/null | wc -l)
 SVN_ROOT := $(shell svn info ${srcdir} | grep "^Repository Root: " | sed -e "s/^Repository Root: //")
 SVN_BRANCH := $(shell svn info ${srcdir} | grep "^URL: " | sed -e "s/^URL: //")
 SVN_REV := r$(shell svnversion -n ${srcdir}) at $(subst $(SVN_ROOT),,$(SVN_BRANCH))
+SVN_BUILD_REV := $(shell svnversion -n ${srcdir})
 
 # We want to define the AsAsm version number as PVtbbbb with
 # P = major version, V = minor version, t = patch release, bbbb = build number
 # P, V and t are derived from the PACKAGE_VERSION in config.h (which is derived
 # from AC_INIT in configure.ac) and bbbb is our SVN revision number.
-ASASM_VERSION := $(shell echo -n "@VERSION@" | sed -e "s/\([0-9]\)\.\([0-9][0-9]\)/\1\2/")$(shell echo -n "0000"`svnversion -n ${srcdir}` | sed -e "s/[0-9]*://" -e "s/\([0-9]*\).*/\1/" | egrep -o "....$$")
+ASASM_VERSION := $(shell echo -n "@VERSION@" | sed -e "s/\([0-9]\)\.\([0-9][0-9]\)/\1\2/")$(shell echo -n "0000$(if $(GIT_REV),$(GIT_BUILD_REV),$(SVN_BUILD_REV))" | sed -e "s/[0-9]*://" -e "s/\([0-9]*\).*/\1/" | egrep -o "....$$")
 
 # Add -DDEBUG if you want to enable the debug routines.
 asasm_CFLAGS = -std=c99 \
@@ -19,7 +22,7 @@ asasm_CFLAGS = -std=c99 \
 	-Wmissing-prototypes -Wnested-externs -Wpointer-arith \
 	-Wredundant-decls -Wshadow -Wstrict-prototypes -Wwrite-strings \
 	-Wno-switch \
-	-DGCCSDK_REVISION="\"$(SVN_REV)\"" \
+	-DGCCSDK_REVISION="\"$(if $(GIT_REV),$(GIT_REV),$(SVN_REV))\"" \
 	-DASASM_VERSION=$(ASASM_VERSION) \
 	-I${top_srcdir}/elftoolchain/common \
 	-I${top_srcdir}/elftoolchain/libelftc \

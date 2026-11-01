@@ -31,4 +31,8 @@ generated using:
 
   $ svn diff svn://svn.riscos.info/gccsdk/branches/CMungeImportBranch/cmunge svn://svn.riscos.info/gccsdk/trunk/gcc4/riscos/cmunge
 
+or this if building from git:
+
+  $ git diff CMungeImportBranch:cmunge HEAD:gcc4/riscos/cmunge
+
 -EOF-

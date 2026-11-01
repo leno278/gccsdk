@@ -1,3 +1,38 @@
+Sun Nov  1  13:09:16 GMT 2026 Lee Noar  <lee.noar@gmx.co.uk>
+
+	* incl-local/internal/swiparams.h: Add new ARMEABISupport constants.
+	* include/fcntl.h(O_SHAREDFILE): Add shared file flag for use with
+	ARMEABISupport.
+	* include/swis.h: Add new ARMEABISupport SWIs numbers.
+	* include/unixlib/buildoptions.h(__UNIXLIB_SHARED_FDS): Add build option
+	for shared file support.
+	Fix spelling mistake in preprocessor check.
+	* sys/mman-armeabi.c(mmap): Use ARMEABISupport_FdOp to determine FD type.
+	(munmap): For a normal Unix FD, let Unixlib do the file write back, otherwise,
+	ARMEABISupport will do it for a shared FD.
+	(msync): Likewise.
+	(__errno_from_armeabisupport): Handle ARMEABISUPPORT_ERROR_EOVERFLOW.
+	* unix/eventfd.c: Remove unnecessary brackets.
+	* unix/fcntl.c(shm_fcntl): Rename to armeabisupport_fcntl because it's no longer
+	just for shared memory.
+	(armeabisupport_fcntl): Add support for accessing the close-on-exec flag of
+	ARMEABISupport FDs via F_GETFD and F_SETFD.
+	Add support for setting and getting advisory file locks on ARMEABISupport FDs via
+	F_GETLK and F_SETLK. Advisory locks do not prevent a task from reading or writing
+	any part of a file. It is up to each task to do the right thing and enquire as to
+	whether there are any locks present.
+	* unix/fstat.c(fstat): Pass any FDs not known by Unixlib to ARMEABISupport.
+	* unix/sync.c(fsync): Likewise.
+	* unix/truncate.c(ftruncate): Likewise.
+	* signal/post.c(enum abort_error, abort_msg): Add abort_ERROR_UNHANDLED and
+	associated string.
+	* unix/ul_close.c(close): Pass any FDs not known by Unixlib to ARMEABISupport.
+	* unix/ul_open: When opening a file, if O_SHAREDFILE is set in the flags, use
+	ARMEABISupport to open it as a shared file.
+	* unix/ul_read: Pass any FDs not known by Unixlib to ARMEABISupport.
+	* unix/ul_lseek: Pass any FDs not known by Unixlib to ARMEABISupport.
+	* unix/ul_isatty: ARMEABISupport FDs are never ttys.
+
 Thu Oct 17  13:34:15 BST 2024 Lee Noar  <lee.noar@sky.com>
 
 	* libm-dbl64/sincos32.h: Fix include guard typo.

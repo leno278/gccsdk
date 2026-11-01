@@ -1,5 +1,5 @@
 /* fstat (), fstat64 ()
- * Copyright (c) 2000-2013 UnixLib Developers
+ * Copyright (c) 2000-2024 UnixLib Developers
  */
 
 #include <errno.h>
@@ -13,6 +13,7 @@
 #include <internal/unix.h>
 #include <unixlib/local.h>
 #include <internal/swiparams.h>
+#include <internal/local.h>
 #include <pthread.h>
 
 int
@@ -24,8 +25,31 @@ fstat (int fd, struct stat *buf)
     return __set_errno (EINVAL);
 
   if (BADF (fd))
-    return __set_errno (EBADF);
+#if __UNIXLIB_SHARED_FDS
+    {
+      _kernel_oserror *err;
+      unsigned objtype, loadaddr, execaddr, objlen, attr;
+      const char *filename;
+      err = _swix(ARMEABISupport_FdOp, _INR(0,1) | _OUTR(0,5),
+		  ARMEABISUPPORT_FDOP_GETINFO,	/*  in: r0 */
+		  fd,				/*  in: r1 */
+		  &objtype,			/* out: r0 */
+		  &filename,			/* out: r1 */
+		  &loadaddr,			/* out: r2 */
+		  &execaddr,			/* out: r3 */
+		  &objlen,			/* out: r4 */
+		  &attr);			/* out: r5 */
+      if (err)
+	return __set_errno (EBADF);
 
+      buf->st_dev = DEV_CUSTOM;
+      buf->st_ino = __get_file_ino (NULL, filename);
+
+      return __stat (objtype, loadaddr, execaddr, objlen, attr, buf);
+    }
+#else
+    return __set_errno (EBADF);
+#endif
   const struct __unixlib_fd *file_desc = getfd (fd);
 
   buf->st_dev = file_desc->devicehandle->type;

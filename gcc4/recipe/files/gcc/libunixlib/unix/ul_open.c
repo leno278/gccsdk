@@ -1,5 +1,5 @@
 /* UnixLib open() and open64() implementation.
-   Copyright (c) 2000-2013 UnixLib Developers.  */
+   Copyright (c) 2000-2024 UnixLib Developers.  */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -7,12 +7,16 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <swis.h>
 
+#include <internal/os.h>
 #include <unixlib/local.h>
 #include <internal/unix.h>
 #include <internal/dev.h>
 #include <internal/fd.h>
 #include <internal/local.h>
+#include <internal/swiparams.h>
+#include <internal/symlinks.h>
 
 /* #define DEBUG */
 #ifdef DEBUG
@@ -88,6 +92,41 @@ __open_fn (int fd, const char *file, int oflag, int mode)
   return fd;
 }
 
+#if __UNIXLIB_SHARED_FDS
+static int
+__open_shared_file (const char *ux_filename, int oflag, int mode)
+{
+  int sftype;
+  char file[MAXPATHLEN];
+  char *end_of_filename = __riscosify_std (ux_filename,
+					   oflag & (O_CREAT | O_WRONLY | O_RDWR),
+					   file, sizeof (file), &sftype);
+  if (end_of_filename == NULL)
+    return __set_errno (ENAMETOOLONG);
+
+  const char *ro_filename;
+#if __UNIXLIB_SYMLINKS
+  char target[MAXPATHLEN];
+  if (__resolve_symlinks (file, target, MAXPATHLEN, 0) != 0)
+    return -1;
+
+  ro_filename = target;
+#else
+  ro_filename = file;
+#endif
+
+  int fd;
+  _kernel_oserror *err;
+  err = _swix(ARMEABISupport_FileOp, _INR(0,3) | _OUT(0),
+	      ARMEABISUPPORT_FILEOP_OPEN,
+	      ro_filename,
+	      oflag,
+	      mode,
+	      &fd);
+  return err ? __ul_seterr (err, __errno_from_armeabisupport (err->errnum)) : fd;
+}
+#endif
+
 int
 open (const char *file, int oflag, ...)
 {
@@ -112,6 +151,13 @@ open (const char *file, int oflag, ...)
     }
   else
     mode = 0777;
+
+#if __UNIXLIB_SHARED_FDS
+  if (oflag & O_SHAREDFILE)
+    {
+      return __open_shared_file(file, oflag, mode);
+    }
+#endif
 
   /* Allocate a new file descriptor. This function automatically
      sets errno if there are none available.  */

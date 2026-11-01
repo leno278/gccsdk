@@ -1,5 +1,5 @@
 /* UnixLib fcntl() implementation.
-   Copyright (c) 2000-2022 UnixLib Developers.  */
+   Copyright (c) 2000-2024 UnixLib Developers.  */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -13,12 +13,12 @@
 #include <internal/unix.h>
 #include <internal/fd.h>
 #include <internal/dev.h>
-#ifdef __ARM_EABI__
+#ifdef __UNIXLIB_SHARED_FDS
 #include <internal/os.h>
 #include <internal/local.h>
 #include <internal/swiparams.h>
 
-static int shm_fcntl(int fd, int cmd);
+static int armeabisupport_fcntl(int fd, int cmd, va_list *);
 #endif
 
 int
@@ -26,13 +26,19 @@ fcntl (int fd, int cmd, ...)
 {
   PTHREAD_UNSAFE_CANCELLATION
 
-#ifdef __ARM_EABI__
-  if (IS_SHM_FD(fd))
-    return shm_fcntl (fd, cmd);
-#endif
-
   if (BADF (fd))
+#if __UNIXLIB_SHARED_FDS
+    {
+      /* It's not a standard Unix fd, check if it's an ARMEABISupport one.  */
+      va_list ap;
+      va_start (ap, cmd);
+      int result = armeabisupport_fcntl (fd, cmd, &ap);
+      va_end (ap);
+      return result;
+    }
+#else
     return __set_errno (EBADF);
+#endif
 
   struct __unixlib_fd *file_desc = getfd (fd);
 
@@ -155,8 +161,8 @@ fcntl (int fd, int cmd, ...)
     }
 }
 
-#ifdef __ARM_EABI__
-int shm_fcntl(int fd, int cmd)
+#if __UNIXLIB_SHARED_FDS
+int armeabisupport_fcntl(int fd, int cmd, va_list *ap)
 {
   switch (cmd)
     {
@@ -165,22 +171,72 @@ int shm_fcntl(int fd, int cmd)
 	_kernel_oserror *err;
 	int duplicate_fd;
 
-	/* Currently, the duplicate fd is the same as the input fd with the
-	 * reference count incremented. Flags are ignored.  */
-	err = _swix(ARMEABISupport_ShmOp, _INR(0,1)|_OUT(0), ARMEABISUPPORT_SHMOP_DUP,
-							     fd, &duplicate_fd);
+	/* Flags are ignored.  */
+	err = _swix(ARMEABISupport_FdOp, _INR(0,1) | _OUT(0),
+		    ARMEABISUPPORT_FDOP_DUP,		/* In r0 */
+		    fd,					/* In r1 */
+		    &duplicate_fd);			/* Out r0 */
 	return err ? __ul_seterr (err, __errno_from_armeabisupport (err->errnum))
 		   : duplicate_fd;
       }
     case F_GETFD:
+      {
+	/* Get close-on-exec flag */
+	int result;
+	_kernel_oserror *err;
+	err = _swix (ARMEABISupport_FdOp, _INR(0,1) | _OUT(0),
+		     ARMEABISUPPORT_FDOP_GETFD,		/* In r0 */
+		     fd,				/* In r1 */
+		     &result);				/* Out r0 */
+	return result;
+      }
     case F_SETFD:
+      {
+	/* Set close-on-exec flag */
+	_kernel_oserror *err;
+	err = _swix (ARMEABISupport_FdOp, _INR(0,2),
+		     ARMEABISUPPORT_FDOP_SETFD,		/* In r0 */
+		     fd,				/* In r1 */
+		     va_arg (*ap, int));		/* In r2 */
+	return err ? __ul_seterr (err, __errno_from_armeabisupport (err->errnum))
+		   : 0;
+      }
     case F_GETFL:
     case F_SETFL:
     case F_GETUNL:
     case F_SETUNL:
     case F_SETOWN:
-    case F_GETLK:
+      return 0;
+    case F_GETLK:{
+      struct flock *arg = va_arg (*ap, struct flock *);
+      _kernel_oserror *err;
+      err = _swix (ARMEABISupport_FdOp, _INR(0,5) | _OUTR(2,5),
+		   ARMEABISUPPORT_FDOP_GETLOCK,		/* In r0 */
+		   fd,					/* In r1 */
+		   arg->l_type,				/* In r2 */
+		   arg->l_whence,			/* In r3 */
+		   arg->l_start,			/* In r4 */
+		   arg->l_len,				/* In r5 */
+		   &arg->l_type,			/* Out r2 */
+		   &arg->l_whence,			/* Out r3 */
+		   &arg->l_start,			/* Out r4 */
+		   &arg->l_len);			/* Out r5 */
+      return err ? __ul_seterr (err, __errno_from_armeabisupport (err->errnum)) : 0;
+    }
     case F_SETLK:
+      {
+	struct flock *arg = va_arg (*ap, struct flock *);
+
+	_kernel_oserror *err;
+	err = _swix (ARMEABISupport_FdOp, _INR(0,5),
+		     ARMEABISUPPORT_FDOP_SETLOCK,	/* In r0 */
+		     fd,				/* In r1 */
+		     arg->l_type,			/* In r2 */
+		     arg->l_whence,			/* In r3 */
+		     arg->l_start,			/* In r4 */
+		     arg->l_len);			/* In r5 */
+	return err ? __ul_seterr (err, __errno_from_armeabisupport (err->errnum)) : 0;
+      }
     case F_SETLKW:
       return 0;
     default:

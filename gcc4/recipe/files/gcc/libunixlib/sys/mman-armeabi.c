@@ -1,5 +1,5 @@
 /* Map or unmap memory.
-   Copyright (c) 1996-2021 UnixLib Developers.  */
+   Copyright (c) 1996-2024 UnixLib Developers.  */
 
 /* Definitions for BSD-style memory management.  */
 /* sys/mman.c: Written by Peter Burwood, 1 November 1996, June 1997  */
@@ -124,15 +124,25 @@ mmap (void * addr, size_t len, int prot, int flags, int fd, off_t offset)
 							 fd,
 							 offset,
 							 &result);
-  if (err || !result)
+  if (err)
+    return (void *) __set_errno (__errno_from_armeabisupport (err->errnum));
+  /* Shouldn't be possible to get a zero result without an error above, but just to be safe...  */
+  if (!result)
     return (void *) __set_errno (ENOMEM);
 
   size_t mapped_size = page_align (gbl, len);
 
   if (flags & MAP_ANON)
     memset (result, 0, mapped_size);
+  if (fd == -1)
+    return result;
 
-  if (fd == -1 || IS_SHM_FD(fd))
+  int fd_type;
+  err = _swix (ARMEABISupport_FdOp, _INR(0,1) | _OUT(1),
+				    ARMEABISUPPORT_FDOP_VALIDATE, 	/* Input 0 */
+				    fd,					/* Input 1 */
+				    &fd_type);				/* Output 1 */
+  if (fd_type == ARMEABISUPPORT_FD_TYPE_SHM)
     return result;
 
   /* Read in the relevant section of the file */
@@ -184,8 +194,7 @@ munmap (void * addr, size_t len)
   size_t size;
   off_t offset;
   int prot, flags, fd;
-
-  err = _swix(ARMEABISupport_MMapOp, _INR(0,1)|_OUTR(0,5),
+  err = _swix(ARMEABISupport_MMapOp, _INR(0,1) | _OUTR(0,5),
 				     ARMEABISUPPORT_MMAPOP_GET_INFO,
 				     addr,
 				     &mmap_addr,
@@ -194,27 +203,21 @@ munmap (void * addr, size_t len)
 				     &flags,
 				     &fd,
 				     &offset);
-  /* We get an error if a specific block wasn't found, however, for a memory
-   * mapping (rather than a file mapping), that isn't an issue.  */
-  if (!err)
+
+  if (!BADF(fd) && (prot & PROT_WRITE) && !(flags & MAP_PRIVATE))
     {
-      /* The start of a previously allocated block was passed in, is it a file
-       * mapping?  */
-      if ((fd != -1 && !IS_SHM_FD(fd)) &&
-	    !BADF(fd) && (prot & PROT_WRITE) && !(flags & MAP_PRIVATE))
-        {
-	  /* Write back file contents if necessary
-	     All the docs I've seen suggest that we only need to write
-	     stuff back on msync(), but some software (e.g. mkimage)
-	     seems to rely on the writeback occuring un munmap().  */
-          /* Assume that the user only wants 'len' bytes writing.  */
-	  off_t oldpos = lseek (fd, 0, SEEK_CUR);
-	  lseek (fd, offset, SEEK_SET);
-	  write (fd, addr, len);
-	  lseek (fd, oldpos, SEEK_SET);
-	}
+      /* Write back file contents if necessary
+	 All the docs I've seen suggest that we only need to write
+	 stuff back on msync(), but some software (e.g. mkimage)
+	 seems to rely on the writeback occuring un munmap().  */
+      /* Assume that the user only wants 'len' bytes writing.  */
+      off_t oldpos = lseek (fd, 0, SEEK_CUR);
+      lseek (fd, offset, SEEK_SET);
+      write (fd, addr, len);
+      lseek (fd, oldpos, SEEK_SET);
     }
 
+  /* This will do the file write back if it's a shared file.  */
   err = _swix(ARMEABISupport_MMapOp, _INR(0,2), ARMEABISUPPORT_MMAPOP_UNMAP,
 						addr,
 						len);
@@ -275,31 +278,43 @@ msync (void * addr, size_t len, int syncflags __attribute__ ((__unused__)))
 				     &fd,
 				     &offset);
   /* If we couldn't find the mmap mapping, then return an error.  */
-  if (err)
+  if (err || fd == -1)
     return __set_errno (EINVAL);
 
   /* Don't access areas outside the mapped range.  */
   if (addr + len > mmap_addr + size)
     return __set_errno (ENOMEM);
 
-  /* Only valid if this is a file open for non-private writing.  */
-  if ((fd == -1 || IS_SHM_FD(fd)) || BADF(fd)
-      || !(prot & PROT_WRITE) || (flags & MAP_PRIVATE))
-    return __set_errno (EINVAL);
-
-  /* If no length specified, flush the whole mapping.  */
-  if (!len)
+  if (!BADF(fd))
     {
-      len = size;
-      addr = mmap_addr;
+      /* Only valid if this is a file open for non-private writing.  */
+      if (!(prot & PROT_WRITE) || (flags & MAP_PRIVATE))
+	return __set_errno (EINVAL);
+
+      /* If no length specified, flush the whole mapping.  */
+      if (!len)
+	{
+	  len = size;
+	  addr = mmap_addr;
+	}
+
+      off_t oldpos = lseek (fd, 0, SEEK_CUR);
+      lseek (fd, offset + addr - mmap_addr, SEEK_SET);
+      int fail = write (fd, addr, len) != len;
+      lseek (fd, oldpos, SEEK_SET);
+
+      return fail ? __set_errno (EIO) : 0;
     }
-
-  off_t oldpos = lseek (fd, 0, SEEK_CUR);
-  lseek (fd, offset + addr - mmap_addr, SEEK_SET);
-  int fail = write (fd, addr, len) != len;
-  lseek (fd, oldpos, SEEK_SET);
-
-  return fail ? __set_errno (EIO) : 0;
+  else
+    {
+      /* ARMEABISupport will handle the file write back for a shared FD.  */
+      err = _swix (ARMEABISupport_FdOp, _INR(0,3),
+					ARMEABISUPPORT_MMAPOP_MSYNC,	/* Input 0 */
+					addr,				/* Input 1 */
+					len,				/* Input 2 */
+					0);				/* Input 3 */
+      return err ? __ul_seterr (err, __errno_from_armeabisupport(err->errnum)) : 0;
+    }
 }
 
 /* Advise the system about particular usage patterns the program follows
@@ -318,7 +333,6 @@ madvise (void * addr, size_t len, int advice)
 				     ARMEABISUPPORT_MMAPOP_GET_INFO,
 				     addr,
 				     &fd);
-  /* For simplicity don't allow remapping of mapped files.  */
   if (err || (fd != -1 && !BADF(fd)))
     return __set_errno (ENOSYS);
 
@@ -338,6 +352,8 @@ void *
 mremap (void * addr, size_t old_len, size_t new_len, int may_move)
 {
   _kernel_oserror *err;
+
+  /* For simplicity we don't allow remapping of mapped files.  */
   void *result;
   err = _swix(ARMEABISupport_MMapOp, _INR(0,4)|_OUT(0), ARMEABISUPPORT_MMAPOP_MREMAP,
 							addr,
@@ -402,6 +418,9 @@ int __errno_from_armeabisupport (int errnum)
     break;
   case ARMEABISUPPORT_ERROR_ENOMEM:
     error = ENOMEM;
+    break;
+  case ARMEABISUPPORT_ERROR_EOVERFLOW:
+    error = EOVERFLOW;
     break;
   default:
     error = EOPSYS;

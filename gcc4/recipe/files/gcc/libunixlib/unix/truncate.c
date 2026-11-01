@@ -1,5 +1,5 @@
 /* Truncate a file to a specified length.
-   Copyright (c) 2005-2021 UnixLib Developers.  */
+   Copyright (c) 2005-2024 UnixLib Developers.  */
 
 #include <errno.h>
 #include <limits.h>
@@ -18,20 +18,31 @@
 # include <pthread.h>
 #endif
 
+#ifdef __UNIXLIB_SHARED_FDS
+#include <internal/swiparams.h>
+#include <internal/local.h>
+#endif
+
 int
 ftruncate (int fd, off_t length)
 {
 #ifndef __TARGET_SCL__
   PTHREAD_UNSAFE
 
-#ifdef __ARM_EABI__
-  /* This is currently a NOOP for a shared memory object.  */
-  if (IS_SHM_FD(fd))
-    return 0;
-#endif
-
   if (BADF (fd))
+#if __UNIXLIB_SHARED_FDS
+    {
+      _kernel_oserror *err;
+      return (err = _swix(ARMEABISupport_FdOp, _INR(0,2),
+			  ARMEABISUPPORT_FDOP_FTRUNCATE,
+			  fd,
+			  length)) != NULL
+	? __ul_seterr (err, __errno_from_armeabisupport (err->errnum))
+	: 0;
+    }
+#else
     return __set_errno (EBADF);
+#endif
 
   struct __unixlib_fd *file_desc = getfd (fd);
   if (file_desc->devicehandle->type != DEV_RISCOS)

@@ -28,6 +28,15 @@
 #  define __UNIXLIB_SYMLINKS		1
 #endif
 
+/* Set to 1 if we want to support shared files/memory (requires ARMEABISupport module).  */
+#ifndef __UNIXLIB_SHARED_FDS
+#  ifdef __ARM_EABI__
+#    define __UNIXLIB_SHARED_FDS	1
+#  else
+#    define __UNIXLIB_SHARED_FDS	0
+#  endif
+#endif
+
 /* Set to 1 if we want to have chunked stack support (needed for APCS-32,
    not needed for EABI).  */
 #ifndef __UNIXLIB_CHUNKED_STACK
@@ -61,7 +70,7 @@
 
 #endif /* __UNIXLIB_CHUNKED_STACK */
 
-#if __UNIXLIB_CHUNKED_STACK && defined (___ARM_EABI__)
+#if __UNIXLIB_CHUNKED_STACK && defined (__ARM_EABI__)
 #  error "EABI based target can not have chunked stacks."
 #endif
 

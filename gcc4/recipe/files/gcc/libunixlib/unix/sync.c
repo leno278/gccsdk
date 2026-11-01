@@ -9,6 +9,8 @@
 #include <internal/dev.h>
 #include <internal/unix.h>
 #include <internal/fd.h>
+#include <internal/swiparams.h>
+#include <internal/local.h>
 #include <pthread.h>
 
 /* This function is always successful.  */
@@ -26,7 +28,18 @@ fsync (int fd)
   PTHREAD_UNSAFE_CANCELLATION
 
   if (BADF (fd))
+#if __UNIXLIB_SHARED_FDS
+    {
+      _kernel_oserror *err;
+      return (err = _swix(ARMEABISupport_FdOp, _INR(0,1),
+		     ARMEABISUPPORT_FDOP_FSYNC,
+		     fd)) != NULL
+	? __ul_seterr (err, __errno_from_armeabisupport (err->errnum))
+	: 0;
+    }
+#else
     return __set_errno (EBADF);
+#endif
 
   struct __unixlib_fd *file_desc = getfd (fd);
 

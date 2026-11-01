@@ -93,6 +93,8 @@ __BEGIN_DECLS
 /* Large file flag - not fully supported but needed for some libraries */
 #define O_LARGEFILE 0x20000
 
+/* Shared file flag for use with ARMEABISupport */
+#define O_SHAREDFILE 0x40000
 
 /* Duplicate file descriptor.  */
 #define F_DUPFD 	0

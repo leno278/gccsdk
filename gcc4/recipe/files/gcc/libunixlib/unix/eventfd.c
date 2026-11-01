@@ -145,8 +145,8 @@ __eventfd_select (struct __unixlib_fd *file_desc, int fd, fd_set *read,
 	  FD_SET (fd, read);
 	  num_fds++;
 	}
-      else{
-	FD_CLR (fd, read);}
+      else
+	FD_CLR (fd, read);
     }
 
   if (write)

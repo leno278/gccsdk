@@ -1,5 +1,5 @@
 /* write () for UnixLib
- * Copyright (c) 2000-2010 UnixLib Developers
+ * Copyright (c) 2000-2024 UnixLib Developers
  */
 
 #include <errno.h>
@@ -8,7 +8,13 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <unistd.h>
+#if __UNIXLIB_SHARED_FDS
+#include <swis.h>
 
+#include <internal/os.h>
+#include <internal/local.h>
+#include <internal/swiparams.h>
+#endif
 #include <internal/dev.h>
 #include <internal/unix.h>
 #include <internal/fd.h>
@@ -28,7 +34,23 @@ write (int fd, const void *buf, size_t nbytes)
   if (nbytes == 0)
     return 0;
   if (BADF (fd))
+#if __UNIXLIB_SHARED_FDS
+    {
+      /* Not known to Unixlib, try ARMEABISupport.  */
+      _kernel_oserror *err;
+      ssize_t bytes_written;
+      return (err = _swix(ARMEABISupport_FdOp, _INR(0,3) | _OUT(0),
+			  ARMEABISUPPORT_FDOP_WRITE,	/*  in: r0  */
+			  fd,				/*  in: r1  */
+			  buf,				/*  in: r2  */
+			  nbytes,			/*  in: r3  */
+			  &bytes_written)) != NULL	/* out: r0  */
+	? __ul_seterr (err, __errno_from_armeabisupport (err->errnum))
+	: bytes_written;
+    }
+#else
     return __set_errno (EBADF);
+#endif
   if (buf == NULL)
     return __set_errno (EINVAL);
 

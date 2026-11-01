@@ -1,4 +1,4 @@
-SWI "ARMEABISupport_AbortOp"
+SWI "ARMEABISupport_AbortOp" (0x59D01)
  r0 = reason code:
 	0 - register abort handler
 	 Entry:
@@ -31,14 +31,13 @@ SWI "ARMEABISupport_AbortOp"
 Abort Handler routine
   Entry:
     r1  = memory address that caused the fault
-    r11 = pointer to block of registers at time of fault (r0-r15, cpu flags)
     r12 = pointer to user data
   Exit:
     r0  = ABORT_HANDLER_CLAIM (1) if able to handle, otherwise ABORT_HANDLER_PASS_ON (0)
     r12 can be corrupted
     All other registers preserved
 
-SWI "ARMEABISupport_MemoryOp"
+SWI "ARMEABISupport_MemoryOp" (0x59D00)
  r0 = reason code:
 	0 - new allocator
 	  Entry:
@@ -129,7 +128,7 @@ SWI "ARMEABISupport_MemoryOp"
 	  Exit:
 	    r0 = handle of allocator, 0 if not found (no error)
 
-SWI "ARMEABISupport_StackOp"
+SWI "ARMEABISupport_StackOp" (0x59D02)
   r0 = reason
 	0 - Alloc
 	  Entry:
@@ -161,7 +160,11 @@ SWI "ARMEABISupport_StackOp"
 	    r1 = Size of given stack (excluding any guard pages), in bytes, or 0 if not found.
 	    r2 = Size of stack guard in bytes (may be 0).
 
-SWI "ARMEABISupport_MMapOp"
+SWI "ARMEABISupport_Cleanup" (0x59D03)
+  Called by Unixlib to free up any stacks used by the app, deregister abort handlers, unmap any
+  memory used, close any FDs used, etc.
+
+SWI "ARMEABISupport_MMapOp" (0x59D04)
   r0 = reason
 	0 - Map
 	  Entry:
@@ -217,3 +220,173 @@ SWI "ARMEABISupport_MMapOp"
 	    r1 = address within page to get protection flags of
 	  Exit:
 	    r0 = mmap protection flags for page containing address given
+
+SWI "ARMEABISupport_ShmOp" (0x59D05)
+  r0 = reason
+	0 - shm_open
+	  Entry:
+	    r1 = name (beginning with a '/' and upto 256 chars)
+	    r2 = flags
+	    r3 = mode
+	  Exit:
+	    r0 = handle (will not be lowest fd in current process) if success (V flag
+			 clear) or error pointer (V flag set).
+	1 - shm_unlink
+	  Entry:
+	    r1 = name
+	  Exit:
+	    r0 = 0 for success (V flag clear) or error pointer (V flag set).
+
+SWI "ARMEABISupport_FdOp" (0x59D06)
+  r0 = reason
+	0 - validate
+	  Entry
+	    r1 = fd
+	  Exit
+	    r0 = error pointer (V set) if unknown fd, or 0 (V clear) if known
+	    r1 = type of fd, 0 if invalid
+	1 - close
+	  Entry
+	    r1 = fd
+	  Exit
+	    r0 = error pointer (V set) if unknown fd, or 0 (V clear) if successful
+	2 - seek
+	  Entry:
+	    r1 = fd
+	    r2 = offset
+	    r3 = whence
+	  Exit:
+	    r0 = new offset
+	3 - read
+	  Entry:
+	    r1 = fd
+	    r2 = buffer
+	    r3 = count
+	  Exit:
+	    r0 = number of bytes read
+	4 - write
+	  Entry:
+	    r1 = fd
+	    r2 = buffer
+	    r3 = count
+	  Exit:
+	    r0 = number of bytes written
+	5 - GetInfo
+	  Entry:
+	    r1 = fd
+	  Exit:
+	    r0 = object type (Redundant as we only operate on regular files?)
+	    r1 = filename
+	    r2 = loadaddr
+	    r3 = execaddr
+	    r4 = length
+	    r5 = attributes
+	6 - SetLock
+	  Entry:
+	    r1 = fd
+	    r2 = type
+	    r3 = whence
+	    r4 = start
+	    r5 = len
+	7 - GetLock
+	  Entry:
+	    r1 = fd
+	    r2 = type
+	    r3 = whence
+	    r4 = start
+	    r5 = len
+	  Exit:
+	    r2 = type updated
+	    r3 = whence updated
+	    r4 = start updated
+	    r5 = len updated
+	8 - fsync
+	  Entry:
+	    r1 = fd
+	9 - ftruncate
+	  Entry:
+	    r1 = fd
+	    r2 = new extent
+     10 - dup
+	  Entry:
+	    r1 = fd
+	  Exit:
+	    r0 = new FD (will not be the lowest fd in current process) if success (V flag
+			     clear) or error pointer (V flag set).
+     11 - dup2
+	  Entry:
+	    r1 = source FD
+	    r2 = destination FD
+	  Exit:
+	    r0 = new FD if successful (V flag clear) or error pointer (V flag set).
+     12 - GETFD (fcntl)
+	  Entry:
+	    r1 = fd
+	  Exit:
+	    r0 = 1 if close-on-exec flag set, 0 if not (V flag clear), or error pointer (V flag set)
+     13 - SETFD (fcntl)
+	  Entry:
+	    r1 = fd
+	    r2 = 0 to clear close-on-exec flag, any other value to set flag
+
+SWI "ARMEABISupport_FileOp" (0x59D07)
+  r0 = reason
+      0 - file open
+	Entry:
+	  r1 = filename
+	  r2 = flags
+	  r3 = mode
+	Exit:
+	  r0 = fd
+
+SWI "ARMEABISupport_PreExec" (0x59D08)
+  Called before SWI "Wimp_StartTask" to set the current app as the parent of the app that
+  is about to start. When the new app starts ARMEABISupport can then duplicate the parents
+  FDs into the child as required.
+
+  Entry: None
+  Exit: None
+
+SWI "ARMEABISupport_IPC" (0x59D09)
+  InterProcess Communication. Added primarily for use by Webkit, replacing the socketpair(),
+  sendmsg() mechanism.
+  r0 = reason
+	0 - IPCOP_OPEN
+	  Entry
+	    r1 = size
+	    r2 = 2 x 32bit word buffer to receive resulting FDs
+	1 - IPCOP_WRITE
+	  Entry
+	    r1 = ipc fd
+	    r2 = buffer
+	    r3 = length
+	2 - IPCOP_WRITE_FDS
+	  Entry
+	    r1 = ipc fd
+	    r2 = ptr to array of 32bit FDs
+	    r3 = number of FDs
+	3 - IPCOP_READ
+	  Entry
+	    r1 = ipc fd
+	    r2 = buffer
+	    r3 = length
+	4 - IPCOP_READ_FDS
+	  Entry
+	    r1 = ipc fd
+	    r2 = array of 32bit FDs
+
+	    On reading the FD array, the FDs are duplicated in the reading process, but can
+	    have a different FD handle to the original whilst refering to the same object.
+
+	5 - IPCOP_READ_RAW
+	  Entry
+	    r1 = ipc fd
+	    r2 = length
+	  Exit
+	    r0 = address of raw data in IPC buffer
+	6 - IPCOP_STATUS
+	  Entry
+	    r1 = ipc fd
+	  Exit
+	    r0 = flags
+	      bit 0 set = ready to read
